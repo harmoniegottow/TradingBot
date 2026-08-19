@@ -1,0 +1,19 @@
+# Zugangsdaten - NIEMALS ins Repo
+.env
+*.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs und lokale Daten
+*.log
+logs/
+data/
+*.sqlite
+*.db
+
+# Betriebssystem
+.DS_Store
