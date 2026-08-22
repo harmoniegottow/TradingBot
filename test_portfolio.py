@@ -133,11 +133,42 @@ def test_permutation_erkennt_zufall():
     print("OK  Permutationstest erkennt Zufall, bei gleichem Umschlag")
 
 
+def test_divisor_zaehlt_nur_aktive():
+    """Instrumente mit spaeterem Start duerfen alte Renditen nicht verwaessern.
+
+    Aufbau: zwei Instrumente, das zweite startet erst zur Haelfte. In der
+    ersten Haelfte muss das Portfolio genau die Rendite des ERSTEN
+    Instruments haben - nicht die Haelfte davon.
+    """
+    n = 400
+    idx = pd.date_range("2020-01-01", periods=n, freq="B")
+    a = pd.Series(100 * np.exp(np.cumsum(np.full(n, 0.001))), index=idx)
+    b = a.copy()
+    b.iloc[: n // 2] = np.nan          # zweites Instrument startet spaeter
+    kurse = pd.DataFrame({"A": a, "B": b})
+
+    pos = pd.DataFrame(1.0, index=idx, columns=["A", "B"])
+    pos["B"] = pos["B"].where(kurse["B"].notna(), 0.0)
+
+    r = rendite_reihe(kurse, pos, kosten=0.0)
+    frueh = r.iloc[10 : n // 2 - 5]
+    erwartet = kurse["A"].pct_change(fill_method=None).iloc[10 : n // 2 - 5]
+
+    abweichung = float((frueh - erwartet).abs().max())
+    print(f"    max. Abweichung in der Einzel-Phase: {abweichung:.2e}")
+    assert abweichung < 1e-9, (
+        f"Divisor falsch: Abweichung {abweichung}. In der Phase mit nur einem "
+        "aktiven Instrument muss das Portfolio dessen Rendite exakt abbilden."
+    )
+    print("OK  Divisor zaehlt nur aktive Instrumente")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("SELBSTTEST DES PORTFOLIO-RAHMENS")
     print("=" * 74)
     test_kein_blick_in_die_zukunft()
+    test_divisor_zaehlt_nur_aktive()
     test_kosten_wirken()
     test_reines_rauschen_bringt_nichts()
     test_permutation_erkennt_zufall()

@@ -111,6 +111,38 @@ def main():
     for schluessel, wert in p.items():
         print(f"  {schluessel:26s} {wert}")
 
+    # ---- Schritt 3b: Verhalten in Krisen vs Aufwaertsphasen
+    print("\n" + "-" * 86)
+    print("SCHRITT 3b  Wann verdient der Mechanismus? (ganzer Zeitraum)")
+    print("-" * 86)
+    print("Momentum soll klassisch in Krisen verdienen, wenn Halten verliert.")
+    print("Genau das ist mit nur 5 Jahren Historie nicht pruefbar gewesen.\n")
+
+    sig_all = signale(kurse, best_rb, best_hl)
+    gew_all = gewichte(kurse, sig_all)
+    r_mom = rendite_reihe(kurse, gew_all)
+    r_bnh = kurse.pct_change(fill_method=None).fillna(0.0).mean(axis=1)
+
+    print(f"  {'Jahr':6s} {'Momentum %':>11s} {'Halten %':>10s} {'Differenz':>10s}")
+    for jahr, gruppe in r_mom.groupby(r_mom.index.year):
+        m = float((1 + gruppe).prod() - 1) * 100
+        b = float((1 + r_bnh.loc[gruppe.index]).prod() - 1) * 100
+        marke = "  <- Halten verliert" if b < 0 else ""
+        print(f"  {jahr:6d} {m:11.1f} {b:10.1f} {m - b:10.1f}{marke}")
+
+    krise = r_bnh.groupby(r_bnh.index.year).apply(lambda g: (1 + g).prod() - 1) < 0
+    krisenjahre = [int(j) for j, ist in krise.items() if ist]
+    if krisenjahre:
+        maske = r_mom.index.year.isin(krisenjahre)
+        km = float((1 + r_mom[maske]).prod() - 1) * 100
+        kb = float((1 + r_bnh[maske]).prod() - 1) * 100
+        print(f"\n  Nur Jahre, in denen Halten verlor ({', '.join(map(str, krisenjahre))}):")
+        print(f"    Momentum {km:+.1f} %   Halten {kb:+.1f} %")
+        if km > kb:
+            print("    -> Der Mechanismus federt genau dort ab, wo Halten wehtut.")
+        else:
+            print("    -> Auch in Krisenjahren kein Vorteil. Das ist ein Ausschlusskriterium.")
+
     # ---- Urteil
     print("\n" + "=" * 86)
     print("URTEIL")

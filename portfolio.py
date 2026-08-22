@@ -43,7 +43,18 @@ HANDELSTAGE_JAHR = 252
 
 
 def lade_kurse(mindest_bars=600) -> pd.DataFrame:
-    """Alle Tagesschlusskurse als eine Tabelle: Zeilen Datum, Spalten Symbol."""
+    """Alle Tagesschlusskurse als eine Tabelle: Zeilen Datum, Spalten Symbol.
+
+    Die Instrumente haben UNTERSCHIEDLICH lange Historie (FX und Metalle ab
+    2003, US500 ab 2009, Indizes erst ab 2015). Deshalb wird bewusst NICHT
+    auf einen gemeinsamen Zeitraum zugeschnitten - das wuerde 12 Jahre FX-
+    Historie wegwerfen. Stattdessen bleiben fehlende Werte vor dem ersten
+    echten Kurs als NaN stehen; signale() erzeugt dort kein Signal und
+    rendite_reihe() zaehlt das Instrument an diesen Tagen nicht mit.
+
+    Wichtig: ffill fuellt nur Luecken INNERHALB der Historie (Feiertage),
+    niemals davor. Sonst wuerden Kurse erfunden.
+    """
     reihen = {}
     for pfad in sorted(DATA_DIR.glob("*_D_1.csv")):
         name = pfad.stem.replace("_D_1", "")
@@ -53,11 +64,10 @@ def lade_kurse(mindest_bars=600) -> pd.DataFrame:
         reihen[name] = df["Close"]
     if not reihen:
         raise SystemExit(
-            "Keine Tagesdaten gefunden. Erst 'python3 lade_portfolio.py 5' laufen lassen."
+            "Keine Tagesdaten gefunden. Erst 'python3 lade_portfolio.py' laufen lassen."
         )
     kurse = pd.DataFrame(reihen).sort_index()
-    # Luecken (Feiertage je Markt) vorwaerts fuellen, aber nicht erfinden:
-    # nur innerhalb der bekannten Historie des Instruments.
+    # ffill wirkt nur ab dem ersten echten Wert je Spalte, davor bleibt NaN.
     return kurse.ffill()
 
 
@@ -93,15 +103,24 @@ def rendite_reihe(kurse: pd.DataFrame, pos: pd.DataFrame,
     WICHTIG: pos wird um einen Tag versetzt. Das Signal von heute wirkt auf
     die Rendite von morgen. Ohne diesen Versatz blickt der Backtest in die
     Zukunft und jedes Ergebnis ist falsch.
+
+    ACHTUNG, hier lag ein Fehler: der Divisor war die Zahl aller Instrumente,
+    die IRGENDWANN gehandelt wurden. Da die Instrumente unterschiedlich lange
+    Historie haben (FX ab 2003, Indizes erst ab 2015), wurde in den frueheren
+    Jahren durch 29 geteilt, obwohl nur 19 Instrumente ueberhaupt handelten.
+    Das verwaessert die alten Renditen kuenstlich um rund ein Drittel.
+    Richtig ist, TAEGLICH zu zaehlen, wie viele Instrumente aktiv sind.
     """
     tagesrendite = kurse.pct_change(fill_method=None).fillna(0.0)
     pos_wirksam = pos.shift(1).fillna(0.0)
 
     brutto = (pos_wirksam * tagesrendite).sum(axis=1)
     wechsel = pos_wirksam.diff().abs().fillna(0.0).sum(axis=1)
-    anzahl = max(int((pos_wirksam != 0).any().sum()), 1)
 
-    return (brutto - wechsel * kosten) / anzahl
+    # Divisor je Tag: wie viele Instrumente sind an diesem Tag aktiv.
+    aktiv = (pos_wirksam != 0).sum(axis=1).clip(lower=1)
+
+    return (brutto - wechsel * kosten) / aktiv
 
 
 def kennzahlen(r: pd.Series) -> dict:
