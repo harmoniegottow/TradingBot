@@ -1,70 +1,81 @@
 """
-strategien/impuls_fifty.py — Baustein 5: Rücksetzer auf die Mitte einer
+strategien/impuls_fifty.py — Baustein 5: Ruecksetzer auf die Mitte einer
 Impulsbewegung, mit Bestaetigungskerze.
 
 Herkunft:
   TikTok-Video von cem_trades (18.08.2026, tiktok.com/@cem_trades/video/
-  7675309392526396694). Regeln aus dem Tonspur-Transkript abgeleitet, die
-  Definition der "starken Bewegung" (acht bis zehn positive Folgekerzen) von
-  Dominique aus dem Bild ergaenzt.
+  7675309392526396694). Regeln aus dem Tonspur-Transkript abgeleitet.
 
   WICHTIG: Das Video liefert KEINEN Beleg. Kein Backtest, kein Zeitraum, kein
-  Markt, keine Zahlen genannt. Der Urheber verweist am Ende auf seine
-  kostenpflichtige Academy - das Video ist Werbung, nicht Nachweis. Diese
-  Umsetzung dient dazu, die Regeln SELBST nachzurechnen, statt sie zu glauben.
-  Details siehe Vault-Ressource "Impuls-Fifty".
+  Markt, keine Zahlen. Der Urheber verweist am Ende auf seine kostenpflichtige
+  Academy - das Video ist Werbung, nicht Nachweis. Diese Umsetzung dient dazu,
+  die Regeln SELBST nachzurechnen. Details siehe Vault-Ressource "Impuls-Fifty".
+
+Zur Definition des Impulses (wichtige Praezisierung vom 22.08.2026):
+  Erste Fassung zaehlte stur acht aufeinanderfolgende positive Kerzen. Das war
+  zu woertlich. Dominique hat klargestellt: Im Video ging es um die DARSTELLUNG
+  eines klaren Aufwaertstrends OHNE Ruecklauf, nicht um eine exakte Kerzenzahl.
+
+  Deshalb wird der Impuls jetzt ueber seine Geradlinigkeit gemessen:
+  Eine Bewegung von einem Tief zu einem Hoch gilt als Impuls, wenn der
+  GROESSTE Rueckschlag INNERHALB der Bewegung klein bleibt (Anteil
+  max_rueck an der Gesamthoehe). Genau das ist "ohne Ruecklauf" - objektiv
+  messbar und unabhaengig davon, ob jede einzelne Kerze positiv schliesst.
 
 Signal-Logik (Long-only):
-  1. IMPULS erkennen: mindestens IMPULS_KERZEN aufeinanderfolgende positive
-     Kerzen (Schluss ueber Eroeffnung). Endet die Serie, ist der Impuls fertig.
-     Hoch = hoechstes Hoch der Serie, Tief = tiefstes Tief der Serie.
-  2. MITTE berechnen: 50-Prozent-Niveau genau zwischen Hoch und Tief. Das ist
-     das einzige verwendete Niveau.
-  3. ABWARTEN, bis der Kurs in dieses Niveau zurueckfaellt (Tief der Kerze
-     erreicht das Niveau oder faellt darunter).
-  4. ERSTE PRUEFUNG: Haben die Verkaeufer im Ruecksetzer MAX_GEGENKERZEN
-     Folgekerzen in dieselbe Richtung geschafft? Wenn ja, Aufbau verwerfen
-     (die Gegenseite ist zu stark). Wenn nein, weiter.
-  5. BESTAETIGUNG abwarten: eine Kerze, die UEBER dem Hoch der Vorkerze
-     schliesst. Das ist das Einstiegssignal.
-  6. STOP: so weit unter dem Einstieg, wie der Ruecksetzer lang ist
-     (Einstieg minus tiefstes Tief seit Beginn des Ruecksetzers).
-  7. ZIEL: festes Chance-Risiko-Verhaeltnis von RR_RATIO zu eins.
+  1. IMPULS suchen: im Rueckblickfenster das tiefste Tief und danach das
+     hoechste Hoch. Bedingungen:
+       - Hoehe mindestens min_atr mal ATR (Bewegung muss bedeutsam sein)
+       - mindestens min_kerzen Kerzen Dauer
+       - groesster Rueckschlag innerhalb der Bewegung hoechstens
+         max_rueck der Gesamthoehe  ->  "ohne Ruecklauf"
+       - die Bewegung ist beendet (Kurs steht unter dem Hoch)
+  2. MITTE: 50-Prozent-Niveau zwischen Impulstief und -hoch. Einziges Niveau.
+  3. ABWARTEN, bis der Kurs in dieses Niveau zurueckfaellt.
+  4. ERSTE PRUEFUNG: Schaffen die Verkaeufer max_gegenkerzen Folgekerzen im
+     Ruecksetzer, wird der Aufbau verworfen (Gegenseite zu stark).
+  5. BESTAETIGUNG: eine Kerze, die UEBER dem Hoch der Vorkerze schliesst.
+     Das ist das Einstiegssignal.
+  6. STOP: so weit unter dem Einstieg, wie der Ruecksetzer lang ist.
+  7. ZIEL: festes Chance-Risiko-Verhaeltnis von rr_ratio zu eins.
 
-  Verworfen wird der Aufbau ausserdem, wenn der Kurs unter das Impulstief
-  faellt (dann ist die Bewegung gebrochen) oder wenn zu viele Kerzen ohne
-  Bestaetigung verstreichen.
-
-Datenbedarf:
-  Funktioniert auf jedem Zeitrahmen mit OHLC-Kerzen. Der Zeitrahmen, auf dem
-  die Strategie gemeint war, wird im Video NICHT genannt - das muss pro Markt
-  und Zeitrahmen selbst geprueft werden.
+  Verworfen wird ausserdem, wenn der Kurs unter das Impulstief faellt
+  (Bewegung gebrochen) oder zu viele Kerzen ohne Bestaetigung verstreichen.
 """
 from __future__ import annotations
 
+import numpy as np
 from backtesting import Strategy
+
+from strategien.indikatoren import atr
 
 
 class ImpulsFifty(Strategy):
-    impuls_kerzen = 8        # Mindestzahl positiver Folgekerzen fuer den Impuls
+    # --- Impulserkennung ---
+    rueckblick = 40          # wie viele Kerzen rueckwaerts nach dem Impuls suchen
+    min_kerzen = 4           # Mindestdauer der Bewegung in Kerzen
+    min_atr = 3.0            # Mindesthoehe der Bewegung in ATR-Einheiten
+    max_rueck = 0.30         # max. Rueckschlag INNERHALB der Bewegung (30 %)
+    atr_len = 14
+
+    # --- Ruecksetzer und Einstieg ---
     max_gegenkerzen = 3      # so viele Gegenkerzen im Ruecksetzer -> verwerfen
-    rr_ratio = 2.0           # Chance-Risiko-Verhaeltnis
+    rr_ratio = 2.0
     max_wartekerzen = 30     # nach so vielen Kerzen ohne Einstieg verwerfen
 
     def init(self):
-        # Impulszaehler
-        self._pos_serie = 0
-        # Fertiger Impuls, auf den wir warten
+        self.atr_wert = self.I(
+            atr, self.data.High, self.data.Low, self.data.Close, self.atr_len
+        )
         self._imp_hoch = None
         self._imp_tief = None
         self._mitte = None
-        # Ruecksetzer-Zustand
         self._mitte_beruehrt = False
         self._gegen_serie = 0
         self._rueck_tief = None
         self._warte = 0
 
-    def _aufbau_verwerfen(self):
+    def _verwerfen(self):
         self._imp_hoch = None
         self._imp_tief = None
         self._mitte = None
@@ -72,80 +83,113 @@ class ImpulsFifty(Strategy):
         self._gegen_serie = 0
         self._rueck_tief = None
         self._warte = 0
+
+    def _impuls_suchen(self):
+        """
+        Sucht im Rueckblickfenster eine geradlinige Aufwaertsbewegung.
+        Gibt (tief, hoch) zurueck oder None.
+        """
+        n = min(self.rueckblick, len(self.data.Close) - 1)
+        if n < self.min_kerzen + 2:
+            return None
+
+        hoch_arr = np.asarray(self.data.High[-n:], dtype=float)
+        tief_arr = np.asarray(self.data.Low[-n:], dtype=float)
+
+        atr_akt = float(self.atr_wert[-1])
+        if not np.isfinite(atr_akt) or atr_akt <= 0:
+            return None
+
+        # Startpunkt: tiefstes Tief im Fenster
+        i_start = int(np.argmin(tief_arr))
+        # Endpunkt: hoechstes Hoch NACH dem Startpunkt
+        if i_start >= len(hoch_arr) - self.min_kerzen:
+            return None
+        i_ende = i_start + int(np.argmax(hoch_arr[i_start:]))
+        if i_ende - i_start < self.min_kerzen:
+            return None
+
+        tief = float(tief_arr[i_start])
+        hoch = float(hoch_arr[i_ende])
+        hoehe = hoch - tief
+        if hoehe < self.min_atr * atr_akt:
+            return None
+
+        # --- Kernpruefung: groesster Rueckschlag INNERHALB der Bewegung ---
+        # Laufendes Hoch mitfuehren, groessten Abstand nach unten messen.
+        lauf_hoch = tief
+        max_rueckschlag = 0.0
+        for k in range(i_start, i_ende + 1):
+            lauf_hoch = max(lauf_hoch, hoch_arr[k])
+            rueckschlag = lauf_hoch - tief_arr[k]
+            max_rueckschlag = max(max_rueckschlag, rueckschlag)
+        if max_rueckschlag > self.max_rueck * hoehe:
+            return None   # zu zappelig, kein klarer Anstieg "ohne Ruecklauf"
+
+        # Die Bewegung muss beendet sein: Kurs steht unter dem Hoch
+        if float(self.data.Close[-1]) >= hoch:
+            return None
+
+        return tief, hoch
 
     def next(self):
-        o = self.data.Open[-1]
-        h = self.data.High[-1]
-        t = self.data.Low[-1]
-        c = self.data.Close[-1]
-
-        positiv = c > o
+        o = float(self.data.Open[-1])
+        h = float(self.data.High[-1])
+        t = float(self.data.Low[-1])
+        c = float(self.data.Close[-1])
         negativ = c < o
 
-        # --- Schritt 1: Impuls zaehlen -------------------------------------
+        # --- Phase 1: Impuls suchen, solange keiner vorliegt --------------
         if self._mitte is None:
-            if positiv:
-                self._pos_serie += 1
-            else:
-                # Serie endet. War sie lang genug, ist der Impuls fertig.
-                if self._pos_serie >= self.impuls_kerzen:
-                    n = self._pos_serie
-                    # Hoch/Tief der Impulsserie (die n Kerzen vor dieser)
-                    hochs = [self.data.High[-1 - i] for i in range(1, n + 1)]
-                    tiefs = [self.data.Low[-1 - i] for i in range(1, n + 1)]
-                    self._imp_hoch = max(hochs)
-                    self._imp_tief = min(tiefs)
-                    if self._imp_hoch > self._imp_tief:
-                        self._mitte = (self._imp_hoch + self._imp_tief) / 2.0
-                        self._mitte_beruehrt = False
-                        self._gegen_serie = 0
-                        self._rueck_tief = None
-                        self._warte = 0
-                self._pos_serie = 0
+            gefunden = self._impuls_suchen()
+            if gefunden is None:
+                return
+            self._imp_tief, self._imp_hoch = gefunden
+            self._mitte = (self._imp_hoch + self._imp_tief) / 2.0
+            self._mitte_beruehrt = False
+            self._gegen_serie = 0
+            self._rueck_tief = None
+            self._warte = 0
             return
 
-        # --- Ab hier liegt ein fertiger Impuls vor -------------------------
         if self.position:
             return
 
         self._warte += 1
         if self._warte > self.max_wartekerzen:
-            self._aufbau_verwerfen()
+            self._verwerfen()
             return
 
-        # Impuls gebrochen -> Aufbau ungueltig
+        # Bewegung gebrochen -> Aufbau ungueltig
         if c < self._imp_tief:
-            self._aufbau_verwerfen()
+            self._verwerfen()
             return
 
-        # Tiefsten Punkt des Ruecksetzers mitfuehren
         self._rueck_tief = t if self._rueck_tief is None else min(self._rueck_tief, t)
 
-        # --- Schritt 3: Ruecksetzer erreicht die Mitte? --------------------
+        # --- Phase 2: Ruecksetzer erreicht die Mitte? ---------------------
         if not self._mitte_beruehrt:
             if t <= self._mitte:
                 self._mitte_beruehrt = True
             else:
                 return
 
-        # --- Schritt 4: Gegenkerzen zaehlen (Verkaeufer zu stark?) --------
+        # --- Phase 3: Gegenkerzen zaehlen (Verkaeufer zu stark?) ---------
         if negativ:
             self._gegen_serie += 1
             if self._gegen_serie >= self.max_gegenkerzen:
-                self._aufbau_verwerfen()
+                self._verwerfen()
                 return
         else:
             self._gegen_serie = 0
 
-        # --- Schritt 5: Bestaetigung = Schluss ueber dem Hoch der Vorkerze -
-        vor_hoch = self.data.High[-2]
-        if c <= vor_hoch:
+        # --- Phase 4: Bestaetigung = Schluss ueber dem Hoch der Vorkerze --
+        if c <= float(self.data.High[-2]):
             return
 
-        # --- Schritt 6/7: Stop = Laenge des Ruecksetzers, Ziel = RR --------
         stop_dist = c - self._rueck_tief
         if not (stop_dist > 0):
             return
 
         self.buy(size=0.1, sl=c - stop_dist, tp=c + stop_dist * self.rr_ratio)
-        self._aufbau_verwerfen()
+        self._verwerfen()
