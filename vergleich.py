@@ -1,95 +1,96 @@
 """
 vergleich.py — Testet ALLE Strategien aus strategien/REGISTRY nach demselben
-Massstab (gleiche Daten, gleiche Kosten) und stellt die Kennzahlen in einer
-Tabelle nebeneinander.
+Massstab und stellt die Kennzahlen nebeneinander.
+
+Seit 22.08.2026 laeuft jede Strategie zwingend durch pruefstand.py, also gegen
+Zufall UND gegen Kaufen-und-Halten. Grund: der Trend-Pullback sah auf Gold H1
+mit Profitfaktor 1,42 gut aus, war aber nachweislich nur der Aufwaertstrend
+(Gold selbst +83,7 %, Zufallseinstiege im Mittel PF 1,15). Ein Profitfaktor
+allein ist wertlos.
 
 Aufruf:
-    python vergleich.py                 # Standard: EURUSD, Tagesdaten
-    python vergleich.py XAUUSD 1h       # anderes Symbol / Intervall (falls CSV da)
-
-WICHTIG zum Zeitrahmen: Laeuft dies auf EUR/USD-TAGESdaten, ist das nur ein
-Funktionsnachweis der METHODE, KEINE Aussage ueber die Guete der Strategien.
-Die Trend-Strategien sind fuer H1/H4 gebaut. Das Skript warnt am Ende.
+    python vergleich.py                      # EURUSD H_1
+    python vergleich.py XAUUSD H_1           # anderes Symbol / Zeitrahmen
+    python vergleich.py XAUUSD H_1 --schnell # ohne Permutationstest (schnell)
 """
 from pathlib import Path
 import sys
-import pandas as pd
-from backtesting import Backtest
 
+import pandas as pd
+
+from pruefstand import KOSTEN_STANDARD, bewerte, lesehilfe
 from strategien import REGISTRY
 
 DATA_DIR = Path(__file__).parent / "data"
 
-# Kennzahlen, die wir vergleichen (Name in stats -> Kurzname in der Tabelle)
-KENNZAHLEN = {
-    "Return [%]": "Ergebnis %",
-    "Profit Factor": "Profitfaktor",
-    "Max. Drawdown [%]": "Max.Ruecklauf %",
-    "# Trades": "Trades",
-    "Win Rate [%]": "Treffer %",
-    "Sharpe Ratio": "Sharpe",
-}
+SPALTEN = [
+    "Trades",
+    "PF",
+    "Ergebnis %",
+    "Einsatz %",
+    "je Einsatz %",
+    "Kaufen+Halten %",
+    "vs K+H fair",
+    "Ruecklauf %",
+    "Zufall PF",
+    "Zufall besser %",
+    "Urteil",
+]
 
 
 def lade_csv(symbol: str, intervall: str) -> pd.DataFrame:
     pfad = DATA_DIR / f"{symbol}_{intervall}.csv"
     if not pfad.exists():
+        vorhanden = sorted(p.stem for p in DATA_DIR.glob("*.csv"))
         raise SystemExit(
-            f"Datei fehlt: {pfad}. Erst 'python daten_laden.py' ausfuehren."
+            f"Datei fehlt: {pfad}\n"
+            f"Vorhanden: {', '.join(vorhanden) or 'nichts'}\n"
+            f"Laden mit: python3 daten_mcp.py {symbol} {intervall} 730"
         )
     df = pd.read_csv(pfad, index_col=0, parse_dates=True)
     return df[["Open", "High", "Low", "Close"]].dropna()
 
 
-def teste_eine(df: pd.DataFrame, strategie_klasse) -> dict:
-    bt = Backtest(
-        df,
-        strategie_klasse,
-        cash=100000,
-        commission=0.0002,   # ~2 Pips pro Trade (grosszuegige Kostenannahme)
-        finalize_trades=True,
-    )
-    stats = bt.run()
-    zeile = {}
-    for lang, kurz in KENNZAHLEN.items():
-        wert = stats.get(lang, float("nan"))
-        try:
-            zeile[kurz] = round(float(wert), 2)
-        except (TypeError, ValueError):
-            zeile[kurz] = wert
-    return zeile
-
-
 def main():
-    symbol = sys.argv[1] if len(sys.argv) > 1 else "EURUSD"
-    intervall = sys.argv[2] if len(sys.argv) > 2 else "1d"
-    df = lade_csv(symbol, intervall)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    schnell = "--schnell" in sys.argv
+    symbol = args[0] if args else "EURUSD"
+    intervall = args[1] if len(args) > 1 else "H_1"
 
+    df = lade_csv(symbol, intervall)
     zeitraum = f"{df.index.min().date()} bis {df.index.max().date()}"
-    print("=" * 78)
-    print("STRATEGIE-VERGLEICH  (gleiche Daten, gleiche Kosten fuer alle)")
-    print(f"Symbol: {symbol}   Intervall: {intervall}   Zeitraum: {zeitraum}")
-    print(f"Kerzen: {len(df)}   Kosten: 0.0002 (~2 Pips/Trade)")
-    print("=" * 78)
+
+    print("=" * 104)
+    print("STRATEGIE-VERGLEICH  (gleiche Daten, gleiche Kosten, gleicher Massstab)")
+    print(f"Symbol: {symbol}   Zeitrahmen: {intervall}   Zeitraum: {zeitraum}")
+    print(f"Kerzen: {len(df)}   Kosten: {KOSTEN_STANDARD} (~2 Pips/Trade)")
+    if schnell:
+        print("SCHNELLMODUS: ohne Permutationstest, Spalten 'Zufall' fehlen.")
+    print("=" * 104)
 
     ergebnisse = {}
     for name, klasse in REGISTRY.items():
-        ergebnisse[name] = teste_eine(df, klasse)
+        print(f"  ... teste {name}", flush=True)
+        ergebnisse[name] = bewerte(df, klasse, mit_permutation=not schnell)
 
-    tabelle = pd.DataFrame(ergebnisse).T   # Strategien als Zeilen
-    with pd.option_context("display.width", 120,
-                           "display.max_columns", None):
+    tabelle = pd.DataFrame(ergebnisse).T
+    spalten = [s for s in SPALTEN if s in tabelle.columns]
+    tabelle = tabelle[spalten]
+
+    print()
+    with pd.option_context("display.width", 200, "display.max_columns", None):
         print(tabelle.to_string())
+    print("=" * 104)
+    print(lesehilfe())
+    print("=" * 104)
 
-    print("=" * 78)
-    if intervall == "1d":
-        print("WARNUNG: TAGESdaten sind NUR ein Funktionsnachweis der Methode.")
-        print("Die Trend-Strategien sind fuer H1/H4 gebaut. Diese Zahlen sagen")
-        print("NICHTS ueber die echte Guete aus. Erst mit echter H1/H4-Historie")
-        print("aus dem cTrader-Zugang wird der Vergleich aussagekraeftig.")
-    print("Lesehilfe: Profitfaktor > 1 = Gewinn je Risiko. Max.Ruecklauf =")
-    print("groesster zwischenzeitlicher Verlust vom Hoch (je kleiner, desto")
-    print("ruhiger). Wenige Trades = wenig statistische Aussagekraft.")
+    bestanden = [n for n, z in ergebnisse.items() if z["Urteil"] == "PRUEFEN"]
+    if bestanden:
+        print(f"Weiter ansehen: {', '.join(bestanden)}")
+    else:
+        print("Ergebnis: KEINE Strategie haelt allen drei Pruefungen stand.")
+        print("Das ist der Normalfall. Jetzt NICHT die Parameter passend drehen,")
+        print("bis eine Zahl gefaellt - das waere Kurvenanpassung und faellt live um.")
     return tabelle
 
 
