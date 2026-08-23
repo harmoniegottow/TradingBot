@@ -79,6 +79,39 @@ ALTERNATIVEN = {
     "XAGUSD": ["SILVER", "SILVERUSD"],
 }
 
+# ----------------------------------------------------------------------
+# Strategie 2: Divergenz Gold gegen Silber
+# ----------------------------------------------------------------------
+# Das ist der EINZIGE Fund, der unseren Pruefstand bestanden hat —
+# geprueft auf zehn Jahren echten Broker-Daten (15447 H4-Kerzen):
+#   Gesamt   136 Trades, Profitfaktor 1,95, Zufall besser in 0,5 %
+#   TEST-Fenster (nie fuer die Parameterwahl benutzt): PF 2,84
+#   Parameter-Nachbarschaft: 11 von 15 Einstellungen bestehen
+#   Kosten: bis 5-fach unauffaellig (PF 1,58)
+#   Gegen Zufall MIT gleichem Trendfilter: 0 von 30 Laeufen erreichen ihn
+#
+# Idee: Gold und Silber laufen normalerweise zusammen. Faellt Gold
+# gegenueber Silber deutlich zurueck (Momentum-Differenz unter ein
+# -1,5-Sigma-Band) und holt dann wieder auf (Differenz kreuzt zurueck
+# darueber), gilt das als Kaufsignal fuer Gold. Zusaetzlich muss Gold
+# ueber seiner EMA150 stehen.
+#
+# ACHTUNG: Braucht ZWEI Kurse. Gehandelt wird nur Gold, Silber ist reine
+# Referenz. Und: Mit 1.000 EUR Echtgeld waere Gold NICHT handelbar
+# (0,01 Lot riskiert rund 35 EUR). Hier laeuft es zur Beobachtung mit,
+# das Journal haelt fest, dass es real nicht ginge.
+DIVERGENZ_AN = True
+DIV_SYMBOL = "XAUUSD"        # wird gehandelt
+DIV_REFERENZ = "XAGUSD"      # nur Referenz, wird NICHT gehandelt
+DIV_TIMEFRAME = "H4"
+DIV_TREND_LEN = 150
+DIV_ATR_LEN = 14
+DIV_ATR_STOP_MULT = 2.0
+DIV_RR_RATIO = 2.0
+DIV_RET_LEN = 20             # Kerzen fuer die Renditeberechnung
+DIV_BAND_LOOKBACK = 100      # Kerzen fuer Mittelwert/Streuung der Differenz
+DIV_BAND_MULT = 1.5          # -1,5-Sigma-Band
+
 # Strategie-Parameter (wie David-V2, aber NUR LONG).
 # Begruendung: Auf unseren Daten war "nur Long" auf allen drei getesteten
 # Maerkten besser als Long+Short (Gold PF 1.59 gegen 1.48).
@@ -108,7 +141,7 @@ TIMEFRAMES = {
 }
 
 JOURNAL_COLS = [
-    "zeit", "kerze", "symbol", "timeframe", "richtung", "kurs",
+    "zeit", "strategie", "kerze", "symbol", "timeframe", "richtung", "kurs",
     "sl", "tp", "lots_berechnet", "risiko_waehrung", "spread_punkte",
     "spread_anteil_stop", "rsi", "atr", "grund", "kapital", "haette_gehandelt",
 ]
@@ -217,6 +250,84 @@ def signal(df: pd.DataFrame) -> tuple[dict | None, str]:
 
 
 # ----------------------------------------------------------------------
+# Divergenz Gold/Silber — dieselbe Rechnung wie im Backtest
+# (strategien/divergenz_gold_silber.py). Wird gegen diese Referenz
+# getestet, siehe test_beobachter.py.
+# ----------------------------------------------------------------------
+def _div_differenz(df_gold: pd.DataFrame, df_silber: pd.DataFrame):
+    """Momentum-Differenz Gold minus Silber und ihr unteres Band.
+
+    Silber wird per ffill auf den Gold-Index gelegt: immer der letzte
+    bekannte Silberkurs AUF ODER VOR dem Gold-Zeitstempel, nie ein
+    spaeterer. Ein spaeterer waere ein Blick in die Zukunft.
+    """
+    y = df_silber["close"].reindex(df_gold.index, method="ffill")
+    if y.isna().all():
+        return None, None
+
+    ret_x = df_gold["close"] / df_gold["close"].shift(DIV_RET_LEN) - 1.0
+    ret_y = y / y.shift(DIV_RET_LEN) - 1.0
+    d = ret_x - ret_y
+
+    mittel = d.rolling(DIV_BAND_LOOKBACK, min_periods=DIV_BAND_LOOKBACK).mean()
+    streuung = d.rolling(DIV_BAND_LOOKBACK, min_periods=DIV_BAND_LOOKBACK).std()
+    return d, mittel - DIV_BAND_MULT * streuung
+
+
+DIV_MIN_BARS = max(DIV_TREND_LEN * 2,
+                   DIV_RET_LEN + DIV_BAND_LOOKBACK,
+                   DIV_ATR_LEN) + 5
+
+
+def divergenz_signal(df_gold: pd.DataFrame,
+                     df_silber: pd.DataFrame) -> tuple[dict | None, str]:
+    """Prueft die letzte geschlossene Gold-Kerze auf ein Divergenz-Signal."""
+    if df_gold is None or df_silber is None:
+        return None, "Kursdaten fehlen"
+    if len(df_gold) < DIV_MIN_BARS or len(df_silber) < DIV_MIN_BARS:
+        return None, (f"zu wenige Kerzen ({len(df_gold)}/{len(df_silber)}, "
+                      f"noetig {DIV_MIN_BARS})")
+
+    d, band = _div_differenz(df_gold, df_silber)
+    if d is None:
+        return None, "Silberkurse passen nicht zum Gold-Zeitraster"
+    if any(pd.isna(v) for v in (d.iloc[-1], d.iloc[-2],
+                                band.iloc[-1], band.iloc[-2])):
+        return None, "Band noch nicht berechenbar"
+
+    jetzt_unter = bool(d.iloc[-1] <= band.iloc[-1])
+    vorher_unter = bool(d.iloc[-2] <= band.iloc[-2])
+    kreuzung = vorher_unter and not jetzt_unter
+
+    ema_trend = ema(df_gold["close"], DIV_TREND_LEN)
+    atr_wert = atr(df_gold, DIV_ATR_LEN)
+    if pd.isna(ema_trend.iloc[-1]) or pd.isna(atr_wert.iloc[-1]):
+        return None, "Indikatoren noch nicht eingeschwungen"
+
+    im_trend = bool(df_gold["close"].iloc[-1] > ema_trend.iloc[-1])
+    abstand = float(d.iloc[-1] - band.iloc[-1])
+
+    if not kreuzung:
+        if jetzt_unter:
+            return None, (f"Gold haengt zurueck (Differenz {d.iloc[-1]:+.4f} "
+                          f"unter Band {band.iloc[-1]:+.4f}) — warte auf "
+                          f"Rueckkreuzung")
+        return None, (f"kein Uebergang (Differenz {d.iloc[-1]:+.4f}, "
+                      f"Abstand zum Band {abstand:+.4f})")
+
+    if not im_trend:
+        return None, ("Rueckkreuzung da, aber Gold unter der "
+                      f"EMA{DIV_TREND_LEN} — kein Kauf im Abwaertstrend")
+
+    stop_dist = float(atr_wert.iloc[-1]) * DIV_ATR_STOP_MULT
+    if stop_dist <= 0:
+        return None, "Stop-Abstand nicht berechenbar"
+
+    return ({"dir": "long", "rsi": float(d.iloc[-1]), "atr": float(atr_wert.iloc[-1]),
+             "stop_dist": stop_dist, "rr": DIV_RR_RATIO}, "Divergenz-Signal")
+
+
+# ----------------------------------------------------------------------
 # Verbindung und Symbole
 # ----------------------------------------------------------------------
 def verbinden() -> None:
@@ -238,6 +349,46 @@ def verbinden() -> None:
                     "zwar nicht, trotzdem besser ein Demokonto verwenden.")
 
 
+def _passende_namen(basis: str, namen: list[str]) -> list[str]:
+    """Broker-Namen zu einem Grundnamen, Futures aussortiert.
+
+    Beruecksichtigt Kuerzel wie '.a' oder '.m' und uebliche
+    Alternativbezeichnungen (GOLD statt XAUUSD). Varianten wie
+    'XAUUSD-F' oder 'GOLD-PERP' fliegen raus: das sind andere
+    Instrumente mit anderer Kontraktgroesse und Verfall.
+    """
+    treffer = []
+    for k in [basis] + ALTERNATIVEN.get(basis, []):
+        treffer += [n for n in namen
+                    if n == k or (n.startswith(k) and len(n) <= len(k) + 5)]
+    treffer = [n for n in treffer
+               if not any(t in n.upper() for t in ("-F", "PERP", "FUT", "-C"))]
+    return sorted(set(treffer), key=len)
+
+
+def finde_einzeln(basisnamen: list[str]) -> dict[str, str]:
+    """Sucht einzelne Symbole und aktiviert sie im Terminal.
+
+    Rueckgabe: Grundname -> echter Broker-Name. Fehlende fehlen im Dict.
+    Wird fuer die Divergenz gebraucht, weil dort auch ein Symbol noetig
+    ist, das gar nicht gehandelt wird (Silber als reine Referenz).
+    """
+    alle = mt5.symbols_get()
+    namen = [s.name for s in alle] if alle else []
+    ergebnis: dict[str, str] = {}
+    for basis in basisnamen:
+        treffer = _passende_namen(basis, namen)
+        if not treffer:
+            log.warning(f"{basis}: beim Broker nicht gefunden.")
+            continue
+        name = treffer[0]
+        info = mt5.symbol_info(name)
+        if info is not None and not info.visible:
+            mt5.symbol_select(name, True)
+        ergebnis[basis] = name
+    return ergebnis
+
+
 def finde_symbole() -> dict[str, str]:
     """Sucht die echten Broker-Namen (mit eventuellem Kuerzel wie '.a')."""
     alle = mt5.symbols_get()
@@ -245,18 +396,7 @@ def finde_symbole() -> dict[str, str]:
     ergebnis: dict[str, str] = {}
 
     for basis, tf in MAERKTE.items():
-        kandidaten = [basis] + ALTERNATIVEN.get(basis, [])
-        treffer = []
-        for k in kandidaten:
-            treffer += [n for n in namen
-                        if n == k or (n.startswith(k) and len(n) <= len(k) + 5)]
-        # Varianten wie "XAUUSD-F" (Future) oder "GOLD-PERP" aussortieren:
-        # das sind ANDERE Instrumente mit anderer Kontraktgroesse und
-        # anderem Verfall, nicht der Kassamarkt, den wir getestet haben.
-        treffer = [n for n in treffer
-                   if not any(teil in n.upper()
-                              for teil in ("-F", "PERP", "FUT", "-C"))]
-        treffer = sorted(set(treffer), key=len)
+        treffer = _passende_namen(basis, namen)
         if not treffer:
             log.warning(f"{basis}: beim Broker nicht gefunden — uebersprungen.")
             continue
@@ -416,23 +556,100 @@ def state_speichern(daten: dict) -> None:
 
 
 # ----------------------------------------------------------------------
+def melde_signal(strategie: str, symbol: str, tf: str, kerze: str,
+                 sig: dict, grund: str, wert_name: str = "RSI") -> None:
+    """Protokolliert ein Signal und was daraus geworden WAERE.
+
+    Von beiden Strategien genutzt, damit Log und Journal identisch
+    aufgebaut sind und die Logik nur an einer Stelle steht.
+    """
+    plan = wuerde_handeln(symbol, sig)
+
+    log.info("-" * 64)
+    log.info(f"SIGNAL {sig['dir'].upper()} [{strategie}]: {symbol} ({tf}) "
+             f"@ Kerze {kerze}")
+    log.info(f"   {wert_name} {sig['rsi']:.4f}, ATR {sig['atr']:.5f}")
+    if plan.get("moeglich"):
+        log.info(f"   WUERDE handeln: {plan['lots']} Lots @ {plan['kurs']}")
+        log.info(f"   SL {plan['sl']}  TP {plan['tp']}")
+        log.info(f"   Risiko laut Broker: {plan['risiko']:.2f} "
+                 f"(Ziel {plan['risiko_ziel']:.2f})")
+        log.info(f"   Spread: {plan.get('spread_punkte', 0):.0f} Punkte "
+                 f"= {plan.get('spread_anteil_stop', 0) * 100:.1f} % "
+                 f"des Stop-Abstands")
+        # Waere dieser Trade auch mit einem kleinen Echtgeldkonto moeglich?
+        for kap in (1000, 5000):
+            ziel = kap * RISK_PERCENT / 100
+            if plan["risiko"] > ziel:
+                log.info(f"   Hinweis: mit {kap} EUR Kapital NICHT handelbar "
+                         f"(kleinstes Lot riskiert {plan['risiko']:.2f}, "
+                         f"Ziel waere {ziel:.2f})")
+                break
+    else:
+        log.info(f"   WUERDE NICHT handeln: {plan.get('grund', '?')}")
+    log.info("   (Es wurde nichts gesendet — Beobachtungsmodus.)")
+    log.info("-" * 64)
+
+    journal({
+        "zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "strategie": strategie,
+        "kerze": kerze, "symbol": symbol, "timeframe": tf,
+        "richtung": sig["dir"].upper(),
+        "kurs": plan.get("kurs", ""),
+        "sl": plan.get("sl", ""), "tp": plan.get("tp", ""),
+        "lots_berechnet": plan.get("lots", ""),
+        "risiko_waehrung": (f"{plan['risiko']:.2f}"
+                            if plan.get("risiko") is not None
+                            and plan.get("moeglich") else ""),
+        "spread_punkte": f"{plan.get('spread_punkte', 0):.1f}",
+        "spread_anteil_stop": f"{plan.get('spread_anteil_stop', 0):.3f}",
+        "rsi": f"{sig['rsi']:.4f}", "atr": f"{sig['atr']:.5f}",
+        "grund": plan.get("grund", "") or grund,
+        "kapital": (f"{plan['kapital']:.2f}" if plan.get("kapital") else ""),
+        "haette_gehandelt": "ja" if plan.get("moeglich") else "nein",
+    })
+
+
 def main() -> None:
     log.info("=" * 64)
     log.info("BEOBACHTUNGSMODUS — dieser Bot sendet KEINE Auftraege.")
-    log.info(f"Parameter: EMA{TREND_LEN} (Puffer {TREND_BUFFER_ATR} ATR), "
+    log.info("Strategie 1 — Trend+Pullback:")
+    log.info(f"   EMA{TREND_LEN} (Puffer {TREND_BUFFER_ATR} ATR), "
              f"RSI{RSI_LEN} @ {RSI_OVERSOLD}, ATR{ATR_LEN}x{ATR_STOP_MULT}, "
              f"RR {RR_RATIO}")
-    log.info(f"Richtung: {'Long' if TRADE_LONG else ''}"
+    log.info(f"   Richtung: {'Long' if TRADE_LONG else ''}"
              f"{' + Short' if TRADE_SHORT else '  (Short bewusst aus)'}")
+    if DIVERGENZ_AN:
+        log.info("Strategie 2 — Divergenz Gold/Silber (der gepruefte Fund):")
+        log.info(f"   {DIV_SYMBOL} gehandelt, {DIV_REFERENZ} als Referenz, "
+                 f"{DIV_TIMEFRAME}")
+        log.info(f"   Rendite ueber {DIV_RET_LEN} Kerzen, Band "
+                 f"{DIV_BAND_LOOKBACK}/-{DIV_BAND_MULT} Sigma, "
+                 f"EMA{DIV_TREND_LEN}, ATR{DIV_ATR_LEN}x{DIV_ATR_STOP_MULT}")
+        log.info("   Auf zehn Jahren geprueft: 136 Trades, Profitfaktor 1,95")
     log.info("=" * 64)
 
     verbinden()
     maerkte = finde_symbole()
 
+    # Fuer die Divergenz zusaetzlich Gold UND Silber bereitstellen.
+    div_gold = div_silber = None
+    if DIVERGENZ_AN:
+        gefunden = finde_einzeln([DIV_SYMBOL, DIV_REFERENZ])
+        div_gold = gefunden.get(DIV_SYMBOL)
+        div_silber = gefunden.get(DIV_REFERENZ)
+        if div_gold and div_silber:
+            log.info(f"Divergenz aktiv: {div_gold} gegen {div_silber} "
+                     f"({DIV_TIMEFRAME})")
+        else:
+            log.warning("Divergenz abgeschaltet — Gold oder Silber beim "
+                        "Broker nicht gefunden.")
+            div_gold = div_silber = None
+
     gespeichert = state_laden()
     letzte_kerze: dict[str, str] = gespeichert.get("bars", {})
     if letzte_kerze:
-        log.info(f"Zustand geladen: {len(letzte_kerze)} Markt/Maerkte aus "
+        log.info(f"Zustand geladen: {len(letzte_kerze)} Eintrag/Eintraege aus "
                  f"vorheriger Sitzung.")
 
     log.info(f"Journal: {JOURNAL_FILE}   Protokoll: {LOG_FILE}")
@@ -464,19 +681,28 @@ def main() -> None:
                     if s:
                         log.info(f"   {sym} ({tf}): Trend {s['trend']}, "
                                  f"RSI {s['rsi']:.0f}")
+                if div_gold and div_silber:
+                    dg = geschlossene_kerzen(div_gold, DIV_TIMEFRAME)
+                    ds = geschlossene_kerzen(div_silber, DIV_TIMEFRAME)
+                    if dg is not None and ds is not None:
+                        _, grund = divergenz_signal(dg, ds)
+                        log.info(f"   Divergenz {div_gold}/{div_silber}: {grund}")
                 letzter_herzschlag = time.monotonic()
 
             geaendert = False
+
+            # --- Strategie 1: Trend + Pullback -------------------------
             for symbol, tf in maerkte.items():
                 df = geschlossene_kerzen(symbol, tf)
                 if df is None or df.empty:
                     continue
 
                 neueste = str(df.index[-1])
-                if letzte_kerze.get(symbol) == neueste:
+                schluessel = f"TP:{symbol}"
+                if letzte_kerze.get(schluessel) == neueste:
                     continue
-                erste_pruefung = symbol not in letzte_kerze
-                letzte_kerze[symbol] = neueste
+                erste_pruefung = schluessel not in letzte_kerze
+                letzte_kerze[schluessel] = neueste
                 geaendert = True
                 if erste_pruefung:
                     log.info(f"{symbol}: erste Kerze erfasst ({neueste}) — "
@@ -489,44 +715,33 @@ def main() -> None:
                     continue
 
                 signale_gesamt += 1
-                plan = wuerde_handeln(symbol, sig)
+                melde_signal("Trend-Pullback", symbol, tf, neueste, sig, grund)
 
-                log.info("-" * 64)
-                log.info(f"SIGNAL {sig['dir'].upper()}: {symbol} ({tf}) "
-                         f"@ Kerze {neueste}")
-                log.info(f"   RSI {sig['rsi']:.1f}, ATR {sig['atr']:.5f}")
-                if plan.get("moeglich"):
-                    log.info(f"   WUERDE handeln: {plan['lots']} Lots @ "
-                             f"{plan['kurs']}")
-                    log.info(f"   SL {plan['sl']}  TP {plan['tp']}")
-                    log.info(f"   Risiko laut Broker: {plan['risiko']:.2f} "
-                             f"(Ziel {plan['risiko_ziel']:.2f})")
-                    log.info(f"   Spread: {plan.get('spread_punkte', 0):.0f} Punkte "
-                             f"= {plan.get('spread_anteil_stop', 0) * 100:.1f} % "
-                             f"des Stop-Abstands")
-                else:
-                    log.info(f"   WUERDE NICHT handeln: {plan.get('grund', '?')}")
-                log.info("   (Es wurde nichts gesendet — Beobachtungsmodus.)")
-                log.info("-" * 64)
-
-                journal({
-                    "zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "kerze": neueste, "symbol": symbol, "timeframe": tf,
-                    "richtung": sig["dir"].upper(),
-                    "kurs": plan.get("kurs", ""),
-                    "sl": plan.get("sl", ""), "tp": plan.get("tp", ""),
-                    "lots_berechnet": plan.get("lots", ""),
-                    "risiko_waehrung": (f"{plan['risiko']:.2f}"
-                                        if plan.get("risiko") is not None
-                                        and plan.get("moeglich") else ""),
-                    "spread_punkte": f"{plan.get('spread_punkte', 0):.1f}",
-                    "spread_anteil_stop": f"{plan.get('spread_anteil_stop', 0):.3f}",
-                    "rsi": f"{sig['rsi']:.1f}", "atr": f"{sig['atr']:.5f}",
-                    "grund": plan.get("grund", "") or grund,
-                    "kapital": (f"{plan['kapital']:.2f}"
-                                if plan.get("kapital") else ""),
-                    "haette_gehandelt": "ja" if plan.get("moeglich") else "nein",
-                })
+            # --- Strategie 2: Divergenz Gold/Silber --------------------
+            if div_gold and div_silber:
+                dg = geschlossene_kerzen(div_gold, DIV_TIMEFRAME)
+                ds = geschlossene_kerzen(div_silber, DIV_TIMEFRAME)
+                if dg is not None and not dg.empty and ds is not None:
+                    neueste = str(dg.index[-1])
+                    schluessel = f"DIV:{div_gold}"
+                    if letzte_kerze.get(schluessel) != neueste:
+                        erste_pruefung = schluessel not in letzte_kerze
+                        letzte_kerze[schluessel] = neueste
+                        geaendert = True
+                        if erste_pruefung:
+                            log.info(f"Divergenz: erste Kerze erfasst "
+                                     f"({neueste}) — Signale ab der naechsten.")
+                        else:
+                            sig, grund = divergenz_signal(dg, ds)
+                            if sig is None:
+                                log.info(f"kein Signal: Divergenz "
+                                         f"{div_gold} ({DIV_TIMEFRAME}) "
+                                         f"@ {neueste} — {grund}")
+                            else:
+                                signale_gesamt += 1
+                                melde_signal("Divergenz", div_gold,
+                                             DIV_TIMEFRAME, neueste, sig,
+                                             grund, wert_name="Differenz")
 
             if geaendert:
                 state_speichern({"bars": letzte_kerze})

@@ -110,18 +110,49 @@ Die CSV laesst sich direkt in Excel oeffnen (Semikolon-getrennt).
 **Nach ein bis zwei Wochen bitte `beobachtung.csv` zurueckschicken** —
 daraus sehen wir, ob Live-Verhalten und Backtest zusammenpassen.
 
-### Eingestellte Strategie
+### Eingestellte Strategien
 
-Trend plus Ruecksetzer, **nur Long**. Short ist bewusst abgeschaltet:
-auf unseren Daten war "nur Long" auf allen drei getesteten Maerkten
-besser (Gold Profitfaktor 1,59 gegen 1,48 mit Short).
+Der Beobachter ueberwacht **zwei** Strategien gleichzeitig. Im Journal
+steht in der Spalte `strategie`, welche das Signal ausgeloest hat.
 
-Maerkte: **EURUSD und USDJPY auf H1, CHFJPY und Gold auf H4.**
+**1. Trend + Pullback, nur Long.**
+Short ist bewusst abgeschaltet: auf unseren Daten war "nur Long" auf
+allen drei getesteten Maerkten besser (Gold Profitfaktor 1,59 gegen
+1,48 mit Short). Maerkte: EURUSD und USDJPY auf H1, CHFJPY auf H4.
 
-Warum genau diese vier? Das Demokonto hat 50.000 EUR, ein spaeteres
-Echtgeldkonto soll 500 bis 1.000 EUR haben. Das kleinste handelbare Lot
-ist ueberall 0,01 und laesst sich nicht unterschreiten. Bei 1.000 EUR
-und 0,5 % Risiko (also 5 EUR je Trade) riskiert dieses kleinste Lot:
+Ehrlicher Hinweis: Diese Strategie hat unseren Pruefstand **nicht**
+bestanden. Sie laeuft mit, um zu sehen, ob sich das Live-Verhalten mit
+dem Backtest deckt — nicht weil wir an sie glauben.
+
+**2. Divergenz Gold gegen Silber** — der einzige gepruefte Fund.
+Gold wird gehandelt, Silber dient nur als Referenz. Zeitrahmen H4.
+
+Idee: Gold und Silber laufen normalerweise zusammen. Faellt Gold
+gegenueber Silber deutlich zurueck und holt dann wieder auf, gilt das
+als Kaufsignal fuer Gold.
+
+Auf zehn Jahren echter Broker-Daten geprueft (15.447 Kerzen):
+
+| Fenster | Trades | Profitfaktor | Zufall besser |
+|---|---|---|---|
+| Gesamt 10 Jahre | 136 | 1,95 | 0,5 % |
+| Testfenster (unberuehrt) | 52 | 2,84 | 2,0 % |
+
+Dazu: 11 von 15 Parametereinstellungen bestehen, bei fuenffachen Kosten
+bleibt Profitfaktor 1,58, und gegen Zufallseinstiege mit demselben
+Trendfilter gewinnt sie in 30 von 30 Laeufen.
+
+**Aber:** Mit 1.000 EUR Echtgeld waere Gold gar nicht handelbar — das
+kleinste Lot riskiert dort rund 35 EUR, siebenfach ueber Budget. Der
+Beobachter schreibt das bei jedem Gold-Signal ausdruecklich ins
+Protokoll.
+
+### Warum die Maerkte so gewaehlt sind
+
+Das Demokonto hat 50.000 EUR, ein spaeteres Echtgeldkonto soll 500 bis
+1.000 EUR haben. Das kleinste handelbare Lot ist ueberall 0,01 und
+laesst sich nicht unterschreiten. Bei 1.000 EUR und 0,5 % Risiko (also
+5 EUR je Trade) riskiert dieses kleinste Lot:
 
 | Markt | Risiko bei 0,01 Lot | mit 1.000 EUR |
 |---|---|---|
@@ -132,10 +163,8 @@ und 0,5 % Risiko (also 5 EUR je Trade) riskiert dieses kleinste Lot:
 | XAGUSD | 27,41 EUR | 5x zu gross |
 | XAUUSD | 35,22 EUR | 7x zu gross |
 
-**Gold laeuft nur zur Beobachtung mit** — der Beobachter handelt ohnehin
-nicht, und im Journal steht dann, dass es mit kleinem Konto real nicht
-ginge. Sonst gaukelt das grosse Demokonto eine Marktauswahl vor, die das
-echte Konto spaeter gar nicht hat.
+Sonst gaukelt das grosse Demokonto eine Marktauswahl vor, die das echte
+Konto spaeter gar nicht hat.
 
 Aenderungen stehen oben in `beobachter.py` im Abschnitt "Einstellungen".
 

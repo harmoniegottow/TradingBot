@@ -121,10 +121,109 @@ def test_kein_order_send_im_code():
     print("  Kein einziger Auftrags-Aufruf im Beobachter enthalten")
 
 
+def test_divergenz_stimmt_mit_backtest():
+    """
+    Die Divergenz im Beobachter muss GENAU dieselben Kerzen erkennen wie
+    der gepruefte Backtest-Baustein. Sonst laeuft live etwas anderes als
+    das, was zehn Jahre lang getestet wurde.
+
+    Geprueft auf den echten MT5-Daten (zehn Jahre H4).
+    """
+    from strategien.divergenz_gold_silber import divergenz_vorbereiten
+
+    basis = Path(__file__).parent / "data-mt5"
+    if not (basis / "XAUUSD_H_4.csv").exists():
+        print("  uebersprungen (keine MT5-Daten vorhanden)")
+        return
+
+    def lade_gross(sym):
+        df = pd.read_csv(basis / f"{sym}_H_4.csv", index_col=0, parse_dates=True)
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        return df[["Open", "High", "Low", "Close"]].dropna()
+
+    gold_gross = lade_gross("XAUUSD")
+    silber_gross = lade_gross("XAGUSD")
+
+    # Referenz: der getestete Backtest-Baustein
+    kombi = divergenz_vorbereiten(gold_gross, silber_gross)
+    ema_ref = kombi["Close"].ewm(span=150, adjust=False).mean()
+    ref_zeiten = set(kombi.index[kombi["DivSignal"] & (kombi["Close"] > ema_ref)])
+
+    # Beobachter: Fenster durchschieben wie im Livebetrieb
+    gold = gold_gross.rename(columns=str.lower)
+    silber = silber_gross.rename(columns=str.lower)
+    fenster = beobachter.BARS_HISTORY
+
+    beob_zeiten = set()
+    for i in range(fenster, len(gold) + 1):
+        g = gold.iloc[i - fenster:i]
+        # Silber bis zum selben Zeitpunkt, wie es live verfuegbar waere
+        s = silber[silber.index <= g.index[-1]].iloc[-fenster:]
+        sig, _ = beobachter.divergenz_signal(g, s)
+        if sig:
+            beob_zeiten.add(g.index[-1])
+
+    # Nur Kerzen vergleichen, die der Beobachter sehen konnte
+    ab = gold.index[fenster - 1]
+    ref_sichtbar = {z for z in ref_zeiten if z >= ab}
+
+    fehlend = ref_sichtbar - beob_zeiten
+    zuviel = beob_zeiten - ref_sichtbar
+
+    print(f"  Referenz (Backtest): {len(ref_sichtbar)} Signale")
+    print(f"  Beobachter:          {len(beob_zeiten)} Signale")
+    assert not fehlend, f"Beobachter verpasst {len(fehlend)} Signale, z.B. {sorted(fehlend)[:3]}"
+    assert not zuviel, f"Beobachter erfindet {len(zuviel)} Signale, z.B. {sorted(zuviel)[:3]}"
+    print("  Divergenz identisch zum geprueften Backtest-Baustein")
+
+
+def test_divergenz_kein_zukunftsblick():
+    """
+    Silber darf NUR mit Kursen bis zum Gold-Zeitpunkt einfliessen.
+    Test: Silber-Daten nach der letzten Gold-Kerze anhaengen und pruefen,
+    dass sich am Signal nichts aendert.
+    """
+    basis = Path(__file__).parent / "data-mt5"
+    if not (basis / "XAUUSD_H_4.csv").exists():
+        print("  uebersprungen (keine MT5-Daten vorhanden)")
+        return
+
+    def lade(sym):
+        df = pd.read_csv(basis / f"{sym}_H_4.csv", index_col=0, parse_dates=True)
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        return df.rename(columns=str.lower)[["open", "high", "low", "close"]].dropna()
+
+    gold = lade("XAUUSD").iloc[-600:]
+    silber_voll = lade("XAGUSD")
+
+    # Fall A: Silber nur bis zum Gold-Ende
+    s_normal = silber_voll[silber_voll.index <= gold.index[-1]].iloc[-600:]
+    sig_a, _ = beobachter.divergenz_signal(gold, s_normal)
+
+    # Fall B: Silber MIT spaeteren Kursen (die es live nicht gaebe)
+    s_zukunft = silber_voll.iloc[-600:].copy()
+    zukunft = s_zukunft.iloc[-5:].copy()
+    zukunft.index = zukunft.index + pd.Timedelta(days=30)
+    zukunft["close"] = zukunft["close"] * 1.5   # kraeftig verfaelscht
+    s_mit_zukunft = pd.concat([s_zukunft, zukunft])
+
+    sig_b, _ = beobachter.divergenz_signal(gold, s_mit_zukunft)
+
+    gleich = (sig_a is None) == (sig_b is None)
+    if sig_a and sig_b:
+        gleich = abs(sig_a["rsi"] - sig_b["rsi"]) < 1e-9
+    assert gleich, "Spaetere Silberkurse veraendern das Signal — Zukunftsblick!"
+    print("  Spaetere Silberkurse beeinflussen das Signal nicht")
+
+
 if __name__ == "__main__":
     print("Pruefe beobachter.py ohne MT5:\n")
     test_indikatoren_stimmen_ueberein()
     test_signale_stimmen_mit_backtest()
     test_short_ist_aus()
     test_kein_order_send_im_code()
+    test_divergenz_stimmt_mit_backtest()
+    test_divergenz_kein_zukunftsblick()
     print("\nAlle Pruefungen bestanden.")
