@@ -116,7 +116,27 @@ Trend plus Ruecksetzer, **nur Long**. Short ist bewusst abgeschaltet:
 auf unseren Daten war "nur Long" auf allen drei getesteten Maerkten
 besser (Gold Profitfaktor 1,59 gegen 1,48 mit Short).
 
-Maerkte: EURUSD, GBPUSD, USDJPY auf H1, Gold auf H4.
+Maerkte: **EURUSD und USDJPY auf H1, CHFJPY und Gold auf H4.**
+
+Warum genau diese vier? Das Demokonto hat 50.000 EUR, ein spaeteres
+Echtgeldkonto soll 500 bis 1.000 EUR haben. Das kleinste handelbare Lot
+ist ueberall 0,01 und laesst sich nicht unterschreiten. Bei 1.000 EUR
+und 0,5 % Risiko (also 5 EUR je Trade) riskiert dieses kleinste Lot:
+
+| Markt | Risiko bei 0,01 Lot | mit 1.000 EUR |
+|---|---|---|
+| EURUSD | 1,76 EUR | passt |
+| USDJPY | 2,01 EUR | passt |
+| CHFJPY | 4,38 EUR | passt knapp |
+| GBPUSD | 15,75 EUR | 3x zu gross |
+| XAGUSD | 27,41 EUR | 5x zu gross |
+| XAUUSD | 35,22 EUR | 7x zu gross |
+
+**Gold laeuft nur zur Beobachtung mit** — der Beobachter handelt ohnehin
+nicht, und im Journal steht dann, dass es mit kleinem Konto real nicht
+ginge. Sonst gaukelt das grosse Demokonto eine Marktauswahl vor, die das
+echte Konto spaeter gar nicht hat.
+
 Aenderungen stehen oben in `beobachter.py` im Abschnitt "Einstellungen".
 
 ---

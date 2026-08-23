@@ -52,11 +52,26 @@ import pandas as pd
 # ----------------------------------------------------------------------
 # Grundnamen ohne Broker-Kuerzel. Das Kuerzel (.a, .m, ...) wird beim
 # Start automatisch gesucht — siehe finde_symbole().
+#
+# AUSWAHL BEGRUENDET: Das Demokonto hat 50.000 EUR, das spaetere
+# Echtgeldkonto soll 500 bis 1.000 EUR haben. Das kleinste handelbare Lot
+# ist ueberall 0,01 und laesst sich nicht unterschreiten. Bei 1.000 EUR
+# und 0,5 % Risiko (= 5 EUR je Trade) riskiert 0,01 Lot:
+#     EURUSD  1,76 EUR   -> passt
+#     USDJPY  2,01 EUR   -> passt
+#     CHFJPY  4,38 EUR   -> passt knapp
+#     GBPUSD 15,75 EUR   -> 3x zu gross
+#     XAUUSD 35,22 EUR   -> 7x zu gross
+# Deshalb stehen hier die Maerkte, die auch mit kleinem Konto
+# funktionieren. Gold laeuft als BEOBACHTUNG mit (der Beobachter handelt
+# ohnehin nicht) — im Journal steht dann, dass es real nicht ginge.
+# Sonst gaukelt das grosse Demokonto eine Auswahl vor, die das echte
+# Konto spaeter nicht hat.
 MAERKTE = {
     "EURUSD": "H1",
-    "GBPUSD": "H1",
     "USDJPY": "H1",
-    "XAUUSD": "H4",
+    "CHFJPY": "H4",
+    "XAUUSD": "H4",   # nur zur Beobachtung, mit 1.000 EUR nicht handelbar
 }
 
 ALTERNATIVEN = {
@@ -235,6 +250,12 @@ def finde_symbole() -> dict[str, str]:
         for k in kandidaten:
             treffer += [n for n in namen
                         if n == k or (n.startswith(k) and len(n) <= len(k) + 5)]
+        # Varianten wie "XAUUSD-F" (Future) oder "GOLD-PERP" aussortieren:
+        # das sind ANDERE Instrumente mit anderer Kontraktgroesse und
+        # anderem Verfall, nicht der Kassamarkt, den wir getestet haben.
+        treffer = [n for n in treffer
+                   if not any(teil in n.upper()
+                              for teil in ("-F", "PERP", "FUT", "-C"))]
         treffer = sorted(set(treffer), key=len)
         if not treffer:
             log.warning(f"{basis}: beim Broker nicht gefunden — uebersprungen.")

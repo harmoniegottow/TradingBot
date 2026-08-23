@@ -1,4 +1,4 @@
-"""Baut eine Roh-Mail mit dem ZIP als Anhang (fuer himalaya message send)."""
+"""Mail mit dem korrigierten MT5-Paket."""
 import sys
 from email.message import EmailMessage
 from pathlib import Path
@@ -8,48 +8,75 @@ zip_pfad = Path("/opt/data/tradingbot/mt5-windows.zip")
 msg = EmailMessage()
 msg["From"] = "SG Harmonie Gottow <social@harmonie-gottow.de>"
 msg["To"] = "dome.herrmann@icloud.com"
-msg["Subject"] = "Tradingbot: MT5-Paket fuer den Windows-Rechner"
+msg["Subject"] = "Tradingbot: korrigiertes MT5-Paket (bitte dieses nehmen)"
 
 msg.set_content("""Hallo Dominique,
 
-im Anhang das MT5-Paket fuer Deinen Windows-Rechner.
+danke fuer die Rueckmeldung. Daraus sind zwei Fehler in meinen Skripten
+aufgefallen und ein wichtiger Befund, den wir vorher nicht auf dem
+Schirm hatten. Im Anhang das korrigierte Paket - bitte das alte
+ersetzen.
 
-ZIP entpacken, Ordner "mt5-windows" zum Beispiel auf den Desktop legen.
-Die README darin erklaert alles Schritt fuer Schritt.
+Was war falsch:
 
-Kurzfassung:
+1. "EURUSD H1: keine Daten" lag an mir, nicht am Broker. Ich hatte
+   100.000 Kerzen auf einmal abgefragt. Ein frisches Terminal hat die
+   Historie noch nicht geladen und liefert dann gar nichts statt
+   weniger. Das Skript versucht jetzt kleinere Mengen und faellt auf
+   eine Zeitraum-Abfrage zurueck.
 
-1. Python ab 3.10 installieren, dabei den Haken bei
-   "Add python.exe to PATH" setzen.
-2. MT5 starten und im Demokonto einloggen.
-3. Eingabeaufforderung im Ordner oeffnen (im Explorer oben in die
-   Adresszeile klicken, cmd eintippen, Enter) und eingeben:
-       pip install MetaTrader5 pandas
-4. Dann der Reihe nach:
-       python pruefe_verbindung.py
-       python hole_historie.py --jahre 10
-       python beobachter.py
+2. Die Zeitrahmen waren willkuerlich zugeordnet (CHFJPY auf H4, Silber
+   auf H1). Jetzt sauber: Metalle auf H4, Devisen auf H1.
 
-Schritt 1 handelt nicht und aendert nichts. Er zeigt vor allem, wie
-Pepperstone die Maerkte bei Deinem Konto wirklich nennt - da haengt je
-nach Kontotyp ein Kuerzel dran, etwa EURUSD.a statt EURUSD. Bitte die
-Ausgabe davon einmal zurueckschicken.
+Der wichtige Befund:
 
-Schritt 2 holt zehn Jahre Kursdaten als CSV. Die Dateien landen im
-Unterordner data und kommen zurueck auf den Server - damit koennen wir
-alle bisherigen Auswertungen mit zehn statt zwei Jahren nachrechnen.
+Dein Demokonto hat 50.000 EUR, das spaetere Echtgeldkonto soll 500 bis
+1.000 EUR haben. Das kleinste handelbare Lot ist ueberall 0,01 und
+laesst sich nicht unterschreiten. Bei 1.000 EUR und 0,5 % Risiko sind
+das 5 EUR je Trade - und da riskiert 0,01 Lot schon:
 
-Schritt 3 ist der Beobachtungsmodus. Er erkennt Signale und
-protokolliert, was er handeln wuerde, sendet aber keine Auftraege.
+    EURUSD   1,76 EUR  -> passt
+    USDJPY   2,01 EUR  -> passt
+    CHFJPY   4,38 EUR  -> passt knapp
+    GBPUSD  15,75 EUR  -> 3x zu gross
+    XAUUSD  35,22 EUR  -> 7x zu gross
 
-Alternativ liegt alles auch im Repo:
+Mit 1.000 EUR sind also nur drei Maerkte handelbar, und Metalle fallen
+komplett weg - ausgerechnet die, auf denen die Beispiel-Bots ihre besten
+Zahlen behaupten.
+
+Das ist kein Fehler, sondern eine Grenze des Kontos. Unangenehm daran
+ist: Ein Demokonto mit 50.000 EUR gaukelt eine Auswahl vor, die das
+echte Konto spaeter nicht hat. Wer auf Demo Gold handelt und dann mit
+1.000 EUR live geht, stellt fest, dass der Bot jeden Gold-Trade
+ablehnt.
+
+Deshalb beobachtet der Bot jetzt EURUSD, USDJPY und CHFJPY - also das,
+was auch spaeter real geht. Gold laeuft nur zur Beobachtung mit.
+
+Noch etwas aufgefallen: Dein Broker fuehrt Gold dreimal - XAUUSD,
+XAUUSD-F und GOLD-PERP. Nur der erste ist der normale Kassamarkt, die
+anderen sind Futures mit anderer Kontraktgroesse. Die werden jetzt
+ausdruecklich aussortiert.
+
+Naechste Schritte, wie gehabt:
+
+    python pruefe_verbindung.py     (hat jetzt einen Schritt 5 dazu)
+    python hole_historie.py --jahre 10
+    python beobachter.py
+
+Falls bei Schritt 4 wieder "keine Daten" steht: im MT5-Terminal einmal
+den EURUSD-Chart oeffnen, auf H1 stellen und weit nach links scrollen
+oder Pos1 druecken. Das Terminal laedt die Historie erst beim Ansehen
+nach. Danach das Skript nochmal laufen lassen.
+
+Alles auch im Repo:
 https://github.com/harmoniegottow/TradingBot  im Ordner mt5-windows
 
 Viele Gruesse
 """)
 
-daten = zip_pfad.read_bytes()
-msg.add_attachment(daten, maintype="application", subtype="zip",
-                   filename="mt5-windows.zip")
+msg.add_attachment(zip_pfad.read_bytes(), maintype="application",
+                   subtype="zip", filename="mt5-windows.zip")
 
 sys.stdout.write(msg.as_string())
