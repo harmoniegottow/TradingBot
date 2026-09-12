@@ -28,10 +28,24 @@ import numpy as np
 import pandas as pd
 from backtesting import Backtest, Strategy
 
+from kosten import Swapsatz, profitfaktor, swap_je_trade
 from strategien.indikatoren import atr
+from strategien.zeitrahmen import angabe_von, spaltenwert, vermerk
 
-# Standardkosten: 2 Basispunkte, entspricht bei EURUSD etwa 2 Pips je Trade.
+# Spread je Seite, 2 Basispunkte - entspricht bei EURUSD etwa 2 Pips je
+# Trade. backtesting.py berechnet ihn bei Einstieg UND Ausstieg, macht also
+# 4 Basispunkte je Runde.
+#
+# Der SWAP steckt hier NICHT drin. Er faellt pro Nacht an, nicht pro Trade,
+# und wird getrennt gerechnet - siehe kosten.py und den Parameter `swapsatz`.
 KOSTEN_STANDARD = 0.0002
+
+# Guthabenzins auf nicht eingesetztes Kapital, passend zum vollen Swapsatz.
+# Der gemessene Swap entspricht rund 5 % Finanzierungskosten; als Guthaben-
+# zins wird davon etwas weniger angesetzt. Wer den Swap mit Faktor 0,25
+# rechnet, nimmt hier ebenfalls ein Viertel - beides beschreibt dasselbe
+# Zinsniveau und muss zusammenpassen.
+ZINS_BEI_VOLLEM_SWAP = 0.04
 KAPITAL = 100_000
 
 # Ab wie vielen Trades reden wir ueberhaupt von Statistik.
@@ -44,6 +58,52 @@ def _lauf(df, klasse, kosten, **kw):
     return Backtest(
         df, klasse, cash=KAPITAL, commission=kosten, finalize_trades=True
     ).run(**kw)
+
+
+def _zinsertrag(df: pd.DataFrame, einsatz_prozent: float,
+                zinssatz: float) -> float:
+    """Verzinsung des Kapitals, das NICHT im Markt steht - in Prozent.
+
+    Warum das nicht zusaetzlich zu 'je Einsatz %' gehoert: Beide Spalten
+    beantworten dieselbe Frage auf zwei Arten. 'je Einsatz %' rechnet hoch,
+    als liefe die Strategie mit vollem Kapital - eine Unterstellung. Der
+    Zinsertrag laesst sie bei ihrer tatsaechlichen Groesse und verzinst den
+    Rest - das ist das, was ein echtes Konto taete. Wer beides addiert,
+    zaehlt denselben Ausgleich zweimal.
+    """
+    if zinssatz <= 0 or not np.isfinite(einsatz_prozent):
+        return 0.0
+    spanne = df.index.max() - df.index.min()
+    jahre = spanne.days / 365.25
+    if jahre <= 0:
+        return 0.0
+    frei = max(0.0, 1.0 - einsatz_prozent / 100.0)
+    return ((1.0 + zinssatz) ** jahre - 1.0) * frei * 100.0
+
+
+def _nach_swap(stats, swapsatz: Swapsatz | None) -> dict:
+    """Rechnet Profitfaktor und Ergebnis mit Swapkosten neu.
+
+    Der Swap veraendert keinen Kurs, er belastet nur das Konto. Stops und
+    Ziele loesen deshalb unveraendert aus - die Ergebnisse lassen sich
+    hinterher verrechnen, ohne den Backtest zu verfaelschen.
+    """
+    roh = {"PF": float(stats.get("Profit Factor", float("nan"))),
+           "Ergebnis": float(stats["Return [%]"]), "Swap": 0.0}
+    if swapsatz is None:
+        return roh
+
+    trades = stats["_trades"]
+    if trades.empty:
+        return roh
+
+    swap = swap_je_trade(trades, swapsatz)
+    bereinigt = trades["PnL"] + swap
+    return {
+        "PF": profitfaktor(bereinigt),
+        "Ergebnis": roh["Ergebnis"] + float(swap.sum()) / KAPITAL * 100.0,
+        "Swap": float(swap.sum()),
+    }
 
 
 def kaufen_und_halten(df: pd.DataFrame) -> float:
@@ -111,6 +171,7 @@ def permutationstest(
     pf_echt: float,
     runden: int = 200,
     kosten: float = KOSTEN_STANDARD,
+    swapsatz: Swapsatz | None = None,
     atr_mult: float = 2.0,
     rr: float = 2.0,
     seed: int = 42,
@@ -131,7 +192,9 @@ def permutationstest(
         klasse = _zufalls_klasse(
             len(df) + 5, wahrsch, atr_mult, rr, seed + runde
         )
-        p = _lauf(df, klasse, kosten).get("Profit Factor", float("nan"))
+        # Der Zufall zahlt dieselben Kosten - sonst vergleicht man die
+        # Strategie mit Kosten gegen den Zufall ohne.
+        p = _nach_swap(_lauf(df, klasse, kosten), swapsatz)["PF"]
         if np.isfinite(p):
             werte.append(float(p))
 
@@ -149,15 +212,23 @@ def bewerte(
     df: pd.DataFrame,
     klasse,
     kosten: float = KOSTEN_STANDARD,
+    swapsatz: Swapsatz | None = None,
+    zinssatz: float = 0.0,
     runden: int = 200,
     mit_permutation: bool = True,
 ) -> dict:
-    """Volle ehrliche Bewertung einer Strategie auf einem Datensatz."""
+    """Volle ehrliche Bewertung einer Strategie auf einem Datensatz.
+
+    `kosten` ist der Spread je Seite, `swapsatz` die Uebernachtkosten. Zwei
+    getrennte Angaben, weil es zwei getrennte Fragen sind: Spread trifft
+    haeufige Trades, Swap trifft lange Haltedauern.
+    """
     stats = _lauf(df, klasse, kosten)
     trades = int(stats["# Trades"])
-    pf = stats.get("Profit Factor", float("nan"))
+    bereinigt = _nach_swap(stats, swapsatz)
+    pf = bereinigt["PF"]
     pf = float(pf) if pf == pf else float("nan")
-    ergebnis = float(stats["Return [%]"])
+    ergebnis = bereinigt["Ergebnis"]
     bnh = kaufen_und_halten(df)
     einsatz = _einsatz_anteil(stats, len(df))
 
@@ -168,8 +239,14 @@ def bewerte(
     else:
         je_einsatz = float("nan")
 
+    # Woher die Zahlen stammen, gehoert in dieselbe Zeile wie die Zahlen.
+    # Ein Baustein ohne belegten Zeitrahmen liefert Kennzahlen, die genauso
+    # aussehen wie gepruefte - der Unterschied muss sichtbar sein.
+    angabe = angabe_von(klasse)
     zeile = {
+        "Zeitrahmen": spaltenwert(angabe),
         "Trades": trades,
+        "Swap": round(bereinigt["Swap"], 0) if swapsatz else 0,
         "PF": round(pf, 2) if np.isfinite(pf) else float("nan"),
         "Ergebnis %": round(ergebnis, 2),
         "Einsatz %": round(einsatz, 2) if np.isfinite(einsatz) else float("nan"),
@@ -181,8 +258,16 @@ def bewerte(
         "Ruecklauf %": round(float(stats["Max. Drawdown [%]"]), 2),
     }
 
+    # Verzinsung des freien Kapitals - die realistische Fassung des
+    # Vergleichs, ohne Hochrechnen auf vollen Einsatz.
+    zins = _zinsertrag(df, einsatz, zinssatz)
+    zeile["Zins %"] = round(zins, 2)
+    zeile["Gesamt %"] = round(ergebnis + zins, 2)
+    zeile["vs K+H real"] = round(ergebnis + zins - bnh, 1)
+
     if mit_permutation:
-        perm = permutationstest(df, trades, pf, runden=runden, kosten=kosten)
+        perm = permutationstest(df, trades, pf, runden=runden, kosten=kosten,
+                                swapsatz=swapsatz)
         zeile["Zufall PF"] = (
             round(perm["zufall_median"], 2)
             if np.isfinite(perm["zufall_median"])
@@ -229,6 +314,14 @@ def lesehilfe() -> str:
             "  Kaufen+Halten %  Was der Markt selbst gemacht hat. Die echte Huerde.",
             "  vs K+H fair      je Einsatz minus Kaufen-und-Halten. Negativ = auch",
             "                   bei gleichem Kapitaleinsatz schlechter als liegen lassen.",
+            "  Zins %           Ertrag des Kapitals, das NICHT im Markt stand.",
+            "  Gesamt %         Ergebnis plus Zins - was das ganze Konto machte.",
+            "  vs K+H real      Gesamt minus Kaufen-und-Halten. Das ist der",
+            "                   Vergleich OHNE Hochrechnen: die Strategie bleibt",
+            "                   bei ihrer echten Groesse, der Rest wird verzinst.",
+            "                   'vs K+H fair' und 'vs K+H real' sind ZWEI Arten,",
+            "                   dieselbe Unfairness auszugleichen - nie beide",
+            "                   zugleich lesen, das zaehlt den Ausgleich doppelt.",
             "  Zufall PF        Profitfaktor blinder Zufallseinstiege (Median).",
             "  Zufall besser %  Anteil der Zufallslaeufe, die die Strategie erreichen",
             f"                   oder schlagen. Unter 5 % = Beleg. Ueber {ZUFALL_GRENZE:.0f} % = kein Beleg.",
@@ -244,5 +337,24 @@ def lesehilfe() -> str:
             "  < Halten          schlechter als der Markt selbst.",
             f"  zu wenig Trades   unter {MIN_TRADES} Trades, statistisch keine Aussage.",
             "  PRUEFEN           haelt allen drei Pruefungen stand. Genauer ansehen!",
+            "",
+            "Kosten:",
+            "  Spread            je Seite, bei Ein- UND Ausstieg berechnet.",
+            "  Swap              je Nacht, mittwochs dreifach, richtungsabhaengig.",
+            "                    Nur wirksam, wenn ein Swapsatz uebergeben wurde.",
+            "  Spalte 'Swap'     Summe der Uebernachtkosten aller Trades, in",
+            "                    Kontowaehrung. Negativ = Kosten.",
+            "  ACHTUNG           'Ruecklauf %' kommt aus dem Backtest und enthaelt",
+            "                    den Swap NICHT - er wird erst danach verrechnet.",
+            "",
+            "Spalte 'Zeitrahmen':",
+            "  H_4 o. ae.        Der Baustein ist fuer diesen Zeitrahmen belegt;",
+            "                    passen die Daten nicht dazu, bricht er ab.",
+            "  ungeprueft        Es gibt keinen Beleg, fuer welchen Zeitrahmen die",
+            "                    Parameter gemeint sind. Die Kennzahlen dieser Zeile",
+            "                    gelten nur fuer genau diese Daten - sie sagen nichts",
+            "                    darueber, ob die Strategie auf einem anderen",
+            "                    Zeitrahmen ebenso liefe. Die Parameter zaehlen",
+            "                    Kerzen, nicht Zeit.",
         ]
     )

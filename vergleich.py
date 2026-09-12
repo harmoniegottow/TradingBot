@@ -20,10 +20,12 @@ import pandas as pd
 
 from pruefstand import KOSTEN_STANDARD, bewerte, lesehilfe
 from strategien import REGISTRY
+from strategien.zeitrahmen import angabe_von, vermerk
 
 DATA_DIR = Path(__file__).parent / "data"
 
 SPALTEN = [
+    "Zeitrahmen",
     "Trades",
     "PF",
     "Ergebnis %",
@@ -84,9 +86,22 @@ def main():
     print(lesehilfe())
     print("=" * 104)
 
+    # Der Vermerk gehoert dorthin, wo die Zahlen stehen - nicht nur in die
+    # Spalte, sondern auch in jede Empfehlung, die aus ihnen folgt.
+    ungeprueft = {n: vermerk(angabe_von(k)) for n, k in REGISTRY.items()}
+    ungeprueft = {n: v for n, v in ungeprueft.items() if v}
+    if ungeprueft:
+        print()
+        print("Zeitrahmen nicht belegt - die Zahlen dieser Zeilen gelten nur"
+              " fuer genau diese Daten:")
+        for name, hinweis in ungeprueft.items():
+            print(f"   {name:<20}{hinweis}")
+
     bestanden = [n for n, z in ergebnisse.items() if z["Urteil"] == "PRUEFEN"]
     if bestanden:
-        print(f"Weiter ansehen: {', '.join(bestanden)}")
+        beschriftet = [f"{n} {ungeprueft[n]}".strip() if n in ungeprueft else n
+                       for n in bestanden]
+        print(f"Weiter ansehen: {', '.join(beschriftet)}")
     else:
         print("Ergebnis: KEINE Strategie haelt allen drei Pruefungen stand.")
         print("Das ist der Normalfall. Jetzt NICHT die Parameter passend drehen,")

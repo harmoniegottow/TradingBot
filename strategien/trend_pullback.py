@@ -10,6 +10,14 @@ from __future__ import annotations
 from backtesting import Strategy
 
 from strategien.indikatoren import ema, rsi, atr
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: in alle_strategien_zehnjahre.py auf H_1 und H_4 gelaufen, aber ohne bestandenen Pruefstand - kein Beleg fuer einen bestimmten Zeitrahmen")
 
 
 class TrendPullback(Strategy):
@@ -21,6 +29,9 @@ class TrendPullback(Strategy):
     rr_ratio = 2.0
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         preis = self.data.Close
         self.ema_trend = self.I(ema, preis, self.trend_len)
         self.rsi_wert = self.I(rsi, preis, self.rsi_len)

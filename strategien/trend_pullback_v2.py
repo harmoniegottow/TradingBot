@@ -16,6 +16,14 @@ from __future__ import annotations
 from backtesting import Strategy
 
 from strategien.indikatoren import ema, rsi, atr
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: laeuft im Beobachter auf H1 (EURUSD, USDJPY) und H4 (CHFJPY, XAUUSD) und wurde in pruefe_v2.py auf beiden gelaufen. Laut beobachter.py hat nur die Divergenz den Pruefstand bestanden, also gibt es keinen Beleg fuer einen Zeitrahmen")
 
 
 class TrendPullbackV2(Strategy):
@@ -30,6 +38,9 @@ class TrendPullbackV2(Strategy):
     trade_short = True
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         preis = self.data.Close
         self.ema_trend = self.I(ema, preis, self.trend_len)
         self.rsi_wert = self.I(rsi, preis, self.rsi_len)

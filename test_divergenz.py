@@ -19,7 +19,9 @@ KLEIN = {"ret_len": 2, "band_lookback": 5, "band_mult": 1.0}
 ANZAHL = 60
 
 
-def reihe(werte, start="2026-01-01 00:00", stunden=1) -> pd.DataFrame:
+def reihe(werte, start="2026-01-01 00:00", stunden=4) -> pd.DataFrame:
+    # Vier Stunden, weil divergenz_gold_silber fuer H4 gilt und seit dem
+    # 12.09.2026 abbricht, wenn die Daten nicht dazu passen.
     zeit = pd.date_range(start, periods=len(werte), freq=f"{stunden}h")
     werte = np.asarray(werte, dtype=float)
     return pd.DataFrame(
@@ -146,7 +148,7 @@ def test_zusaetzliche_silber_zeitstempel_aendern_nichts():
     )
 
     versetzt = silber.copy()
-    versetzt.index = versetzt.index + pd.Timedelta(minutes=30)
+    versetzt.index = versetzt.index + pd.Timedelta(hours=2)
     zusatz = pd.concat([silber, versetzt]).sort_index()
 
     pd.testing.assert_series_equal(ohne_zusatz, signale(gold, zusatz))

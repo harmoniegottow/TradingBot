@@ -41,10 +41,33 @@ from __future__ import annotations
 import datetime as dt
 
 from backtesting import Strategy
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: in alle_strategien_zehnjahre.py auf H_1 und H_4 gelaufen. Zusaetzlich fraglich, weil session_start_hour eine feste UTC-Stunde ist - siehe Vermerk dort")
 
 
 class OpeningRangeBreakout(Strategy):
     # Sitzungsanker in UTC. 7 = London-Open (Sommerzeit grob), 13 = NY grob.
+    # ACHTUNG, zwei Einschraenkungen zu dieser Stunde:
+    #
+    # 1. Sie ist nur bei korrekten UTC-Zeitstempeln sinnvoll. Die Dateien in
+    #    data-mt5/ tragen Broker-Serverzeit, sind aber als UTC beschriftet
+    #    (siehe data-mt5/ACHTUNG-Zeitstempel.md) - dort lag dieses Fenster
+    #    real auf 04:00 bzw. 05:00 UTC. Alle ORB-Ergebnisse auf jenem Ordner
+    #    sind damit hinfaellig. data-ctrader/ traegt echtes UTC.
+    #
+    # 2. Eine FESTE UTC-Stunde trifft eine Handelssitzung ohnehin nur ein
+    #    halbes Jahr lang: London und New York verschieben sich gegen UTC mit
+    #    ihrer Sommerzeit, und die Termine dafuer liegen auch noch
+    #    auseinander. Wer die Eroeffnung meint, muss in der Zeitzone der
+    #    Boerse rechnen, nicht in einer UTC-Konstanten.
+    #
+    # Siehe [[ORB - Opening Range Breakout]].
     session_start_hour = 7
     session_start_minute = 0
     opening_minutes = 30      # Laenge der Eroeffnungsspanne in Minuten
@@ -52,6 +75,9 @@ class OpeningRangeBreakout(Strategy):
     rr_ratio = 2.0
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         # Zustand pro Handelstag
         self._akt_tag = None
         self._range_hoch = None

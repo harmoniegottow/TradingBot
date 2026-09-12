@@ -14,6 +14,14 @@ from backtesting import Strategy
 from backtesting.lib import crossover
 
 from strategien.indikatoren import sma
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: in alle_strategien_zehnjahre.py auf H_1 und H_4 gelaufen, ohne bestandenen Pruefstand")
 
 
 class MaKreuzung(Strategy):
@@ -21,6 +29,9 @@ class MaKreuzung(Strategy):
     lang = 50
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         preis = self.data.Close
         self.ma_kurz = self.I(sma, preis, self.kurz)
         self.ma_lang = self.I(sma, preis, self.lang)

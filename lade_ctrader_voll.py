@@ -66,6 +66,9 @@ TEILE_ORDNER = ZIEL_ORDNER / ".teile"
 STARTPUNKT = {
     "H1": datetime(2006, 1, 1, tzinfo=timezone.utc),
     "H4": datetime(2004, 1, 1, tzinfo=timezone.utc),
+    # Gemessen beginnt XAUUSD D1 im April 1998 - mit Rand davor, damit ein
+    # Symbol mit laengerer Historie nicht am Startpunkt abgeschnitten wird.
+    "D1": datetime(1996, 1, 1, tzinfo=timezone.utc),
 }
 STANDARD_ZEITRAHMEN = ("H1", "H4")
 

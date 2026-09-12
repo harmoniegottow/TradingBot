@@ -48,6 +48,14 @@ import numpy as np
 from backtesting import Strategy
 
 from strategien.indikatoren import atr
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: in pruefe_impuls_usdjpy.py auf H_1 gelaufen, ohne bestandenen Pruefstand - ein Lauf ist kein Beleg")
 
 
 class ImpulsFifty(Strategy):
@@ -64,6 +72,9 @@ class ImpulsFifty(Strategy):
     max_wartekerzen = 30     # nach so vielen Kerzen ohne Einstieg verwerfen
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         self.atr_wert = self.I(
             atr, self.data.High, self.data.Low, self.data.Close, self.atr_len
         )

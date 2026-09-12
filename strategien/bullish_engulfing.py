@@ -16,6 +16,14 @@ from __future__ import annotations
 from backtesting import Strategy
 
 from strategien.indikatoren import ema
+from strategien.zeitrahmen import (
+    ungeprueft,
+    zeitrahmen_pruefen,
+)
+
+# Fuer welchen Zeitrahmen die Parameter gemeint sind.
+ZEITRAHMEN = ungeprueft(
+    "ungeprueft: in alle_strategien_zehnjahre.py auf H_1 und H_4 gelaufen, ohne bestandenen Pruefstand")
 
 
 class BullishEngulfing(Strategy):
@@ -23,6 +31,9 @@ class BullishEngulfing(Strategy):
     rr_ratio = 2.0
 
     def init(self):
+        # Bricht ab, wenn die Daten nicht zu ZEITRAHMEN passen.
+        zeitrahmen_pruefen(self.data.index, ZEITRAHMEN,
+                           type(self).__name__)
         self.ema_trend = self.I(ema, self.data.Close, self.trend_len)
 
     def next(self):
