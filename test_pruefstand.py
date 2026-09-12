@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from backtesting import Strategy
 
-from pruefstand import bewerte, kaufen_und_halten, urteil
+from pruefstand import MIN_TRADES, bewerte, kaufen_und_halten, urteil
 
 
 def _kurse(werte) -> pd.DataFrame:
@@ -76,7 +76,15 @@ def test_hellsehende_strategie_besteht():
 
 
 def test_zufallsstrategie_faellt_durch():
-    """Eine reine Muenzwurf-Strategie darf NIEMALS bestehen."""
+    """Eine reine Muenzwurf-Strategie darf NIEMALS bestehen.
+
+    ACHTUNG, warum unten zusaetzlich die Trade-Zahl geprueft wird: Der Test
+    belegt seine Aussage durch ein AUSBLEIBEN ("besteht nicht"). Haette der
+    Muenzwurf zufaellig zu wenige Trades, lautete das Urteil "zu wenig
+    Trades" - der Test waere gruen, ohne dass der Pruefstand jemals die
+    statistische Huerde angelegt haette. Erst mit genug Trades ist die
+    Ablehnung eine Aussage ueber die Signalguete.
+    """
     rng = np.random.default_rng(11)
     werte = 100 + np.cumsum(rng.normal(0, 0.3, 4000))
     df = _kurse(werte)
@@ -98,6 +106,11 @@ def test_zufallsstrategie_faellt_durch():
     print(
         f"    Muenzwurf: PF {zeile['PF']}  Trades {zeile['Trades']}  "
         f"Zufall besser {zeile.get('Zufall besser %')} %  -> {zeile['Urteil']}"
+    )
+    assert zeile["Trades"] >= MIN_TRADES, (
+        f"Muenzwurf handelte nur {zeile['Trades']} mal (Mindestzahl"
+        f" {MIN_TRADES}). Die Ablehnung kaeme dann allein aus der Trade-Zahl"
+        " und saegte nichts ueber die Erkennung von Zufall aus."
     )
     assert zeile["Urteil"] != "PRUEFEN", (
         f"Muenzwurf darf nicht bestehen, Urteil war '{zeile['Urteil']}'"

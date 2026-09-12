@@ -96,6 +96,12 @@ def test_signale_stimmen_mit_backtest():
     fehlend = set(ref) - set(beob_zeiten)
     zuviel = set(beob_zeiten) - set(ref)
 
+    # Ohne diese Absicherung waere der Test auch dann gruen, wenn BEIDE Seiten
+    # gar kein Signal faenden - zwei leere Mengen sind deckungsgleich.
+    assert len(ref) > 0, (
+        "Die Referenz findet kein einziges Signal - dieser Vergleich koennte"
+        " eine Abweichung gar nicht bemerken."
+    )
     assert not fehlend, f"Beobachter verpasst {len(fehlend)} Signale"
     assert not zuviel, f"Beobachter erfindet {len(zuviel)} Signale"
     assert all(r == "long" for _, r in beob_signale), "Short darf nicht kommen"
@@ -109,16 +115,38 @@ def test_short_ist_aus():
     print("  Short ist abgeschaltet, Long aktiv")
 
 
+VERBOTEN = ("mt5.order_send(", "TRADE_ACTION_DEAL", "TRADE_ACTION_SLTP",
+            "position_close")
+
+
 def test_kein_order_send_im_code():
-    """Der wichtigste Test: Der Beobachter darf NIRGENDS Auftraege senden."""
+    """Der wichtigste Test: Der Beobachter darf NIRGENDS Auftraege senden.
+
+    Dieser Test belegt eine Eigenschaft durch ihr AUSBLEIBEN. Damit das eine
+    Aussage ist, muss zweierlei feststehen: dass die richtige Datei gelesen
+    wurde (nicht eine leere oder falsche), und dass die Suche einen echten
+    Aufruf ueberhaupt faende. Beides wird hier vorher nachgewiesen.
+    """
     quelle = (Path(__file__).parent / "mt5-windows" / "beobachter.py").read_text(
         encoding="utf-8")
+
+    assert "def divergenz_signal(" in quelle and len(quelle) > 2000, (
+        "Die gelesene Datei sieht nicht nach beobachter.py aus - die Suche"
+        " liefe ins Leere und der Test waere trotzdem gruen."
+    )
+    for verboten in VERBOTEN:
+        probe = f"irgendwas\n    {verboten}dings\n"
+        assert verboten in probe, (
+            f"Die Suche nach '{verboten}' wuerde einen echten Aufruf nicht"
+            " finden - der Test waere blind."
+        )
+
     # Kommentare/Docstring erwaehnen order_send absichtlich — echte Aufrufe
     # haetten die Form "mt5.order_send("
-    assert "mt5.order_send(" not in quelle, "GEFAHR: order_send im Beobachter!"
-    for verboten in ("TRADE_ACTION_DEAL", "TRADE_ACTION_SLTP", "position_close"):
+    for verboten in VERBOTEN:
         assert verboten not in quelle, f"GEFAHR: {verboten} im Beobachter!"
-    print("  Kein einziger Auftrags-Aufruf im Beobachter enthalten")
+    print("  Kein einziger Auftrags-Aufruf im Beobachter enthalten"
+          f" ({len(quelle)} Zeichen geprueft)")
 
 
 def test_divergenz_stimmt_mit_backtest():
@@ -173,16 +201,42 @@ def test_divergenz_stimmt_mit_backtest():
 
     print(f"  Referenz (Backtest): {len(ref_sichtbar)} Signale")
     print(f"  Beobachter:          {len(beob_zeiten)} Signale")
+    assert len(ref_sichtbar) > 0, (
+        "Die Referenz findet kein einziges Divergenz-Signal - der Vergleich"
+        " waere leer gegen leer und damit ohne Aussage."
+    )
     assert not fehlend, f"Beobachter verpasst {len(fehlend)} Signale, z.B. {sorted(fehlend)[:3]}"
     assert not zuviel, f"Beobachter erfindet {len(zuviel)} Signale, z.B. {sorted(zuviel)[:3]}"
     print("  Divergenz identisch zum geprueften Backtest-Baustein")
 
 
+def _fenster_mit_signal(gold, silber, fenster):
+    """Sucht ein Fenster, in dem die Divergenz ueberhaupt anschlaegt.
+
+    Ohne so ein Fenster laesst sich ueber Zukunftsblick nichts aussagen:
+    "kein Signal" bleibt "kein Signal", egal was man den Daten antut.
+    """
+    for ende in range(len(gold), fenster - 1, -1):
+        g = gold.iloc[ende - fenster:ende]
+        s = silber[silber.index <= g.index[-1]].iloc[-fenster:]
+        sig, _ = beobachter.divergenz_signal(g, s)
+        if sig:
+            return g, s, sig
+    return None, None, None
+
+
 def test_divergenz_kein_zukunftsblick():
     """
     Silber darf NUR mit Kursen bis zum Gold-Zeitpunkt einfliessen.
-    Test: Silber-Daten nach der letzten Gold-Kerze anhaengen und pruefen,
-    dass sich am Signal nichts aendert.
+
+    ACHTUNG, Aufbau des Tests: Frueher stand hier ein Fenster, in dem gar
+    kein Signal entstand. Der Test verglich dann "kein Signal" mit "kein
+    Signal" und bestand - ohne irgendetwas ueber Zukunftsblick zu belegen.
+
+    Jetzt wird erst ein Fenster gesucht, in dem die Divergenz anschlaegt,
+    und danach mit einer Gegenprobe nachgewiesen, dass das Signal an dieser
+    Stelle ueberhaupt auf Silber reagiert. Erst dann ist das Ausbleiben
+    einer Aenderung eine Aussage.
     """
     basis = Path(__file__).parent / "data-mt5"
     if not (basis / "XAUUSD_H_4.csv").exists():
@@ -195,27 +249,49 @@ def test_divergenz_kein_zukunftsblick():
             df.index = df.index.tz_localize(None)
         return df.rename(columns=str.lower)[["open", "high", "low", "close"]].dropna()
 
-    gold = lade("XAUUSD").iloc[-600:]
-    silber_voll = lade("XAGUSD")
+    gold_voll, silber_voll = lade("XAUUSD"), lade("XAGUSD")
+    fenster = beobachter.BARS_HISTORY
+    gold, s_normal, sig_a = _fenster_mit_signal(gold_voll, silber_voll, fenster)
+    assert sig_a is not None, (
+        "Kein einziges Fenster mit Divergenz-Signal gefunden - dieser Test"
+        " koennte Zukunftsblick gar nicht bemerken."
+    )
+    print(f"  Pruefstelle: Gold bis {gold.index[-1]}, Signal vorhanden")
 
-    # Fall A: Silber nur bis zum Gold-Ende
-    s_normal = silber_voll[silber_voll.index <= gold.index[-1]].iloc[-600:]
-    sig_a, _ = beobachter.divergenz_signal(gold, s_normal)
+    # Gegenprobe: Reagiert das Signal hier ueberhaupt auf Silber? Dafuer wird
+    # Silber INNERHALB des sichtbaren Bereichs verfaelscht.
+    #
+    # Wichtig ist WIE verfaelscht wird: Die Divergenz rechnet mit RENDITEN.
+    # Die ganze Reihe mit einem Faktor zu multiplizieren aendert daran nichts
+    # - eine solche "Gegenprobe" waere selbst blind. Es muss ein Knick in die
+    # Reihe, der die Renditen am Ende des Fensters verschiebt.
+    s_verfaelscht = s_normal.copy()
+    s_verfaelscht.iloc[-20:, s_verfaelscht.columns.get_loc("close")] *= 1.5
+    sig_kontrolle, _ = beobachter.divergenz_signal(gold, s_verfaelscht)
+    assert not _signal_gleich(sig_a, sig_kontrolle), (
+        "Das Signal reagiert an dieser Stelle nicht einmal auf verfaelschte"
+        " Silberkurse im sichtbaren Bereich - der Test waere blind."
+    )
+    print("  Gegenprobe: Silber im sichtbaren Bereich veraendert das Signal")
 
-    # Fall B: Silber MIT spaeteren Kursen (die es live nicht gaebe)
-    s_zukunft = silber_voll.iloc[-600:].copy()
-    zukunft = s_zukunft.iloc[-5:].copy()
+    # Eigentliche Pruefung: Silber MIT spaeteren Kursen, die es live nicht gaebe.
+    zukunft = s_normal.iloc[-5:].copy()
     zukunft.index = zukunft.index + pd.Timedelta(days=30)
-    zukunft["close"] = zukunft["close"] * 1.5   # kraeftig verfaelscht
-    s_mit_zukunft = pd.concat([s_zukunft, zukunft])
+    zukunft["close"] = zukunft["close"] * 1.5
+    sig_b, _ = beobachter.divergenz_signal(gold, pd.concat([s_normal, zukunft]))
 
-    sig_b, _ = beobachter.divergenz_signal(gold, s_mit_zukunft)
-
-    gleich = (sig_a is None) == (sig_b is None)
-    if sig_a and sig_b:
-        gleich = abs(sig_a["rsi"] - sig_b["rsi"]) < 1e-9
-    assert gleich, "Spaetere Silberkurse veraendern das Signal — Zukunftsblick!"
+    assert _signal_gleich(sig_a, sig_b), (
+        "Spaetere Silberkurse veraendern das Signal - Zukunftsblick!"
+    )
     print("  Spaetere Silberkurse beeinflussen das Signal nicht")
+
+
+def _signal_gleich(a, b) -> bool:
+    if (a is None) != (b is None):
+        return False
+    if a is None:
+        return True
+    return abs(a["rsi"] - b["rsi"]) < 1e-9
 
 
 if __name__ == "__main__":

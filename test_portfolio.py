@@ -87,12 +87,30 @@ def test_echtes_momentum_wird_erkannt():
 
 
 def test_reines_rauschen_bringt_nichts():
-    """Bei reinem Rauschen darf keine Kante entstehen."""
+    """Bei reinem Rauschen darf keine Kante entstehen.
+
+    ACHTUNG, warum unten zuerst der Umschlag geprueft wird: Der Test belegt
+    seine Aussage durch ein AUSBLEIBEN. Naehme der Rahmen ueberhaupt keine
+    Positionen ein, waere der Sharpe null und der Test gruen - er haette dann
+    aber nur bewiesen, dass Nichtstun nichts bringt.
+    """
     kurse = _kurse(n=1500, m=8, seed=11)
     sig = signale(kurse, rueckblick=60, halten=21)
     gew = gewichte(kurse, sig)
-    k = kennzahlen(rendite_reihe(kurse, gew))
-    print(f"    Rauschen: Sharpe {k['Sharpe']:.2f}  pro Jahr {k['pro Jahr %']:.1f} %")
+    r = rendite_reihe(kurse, gew)
+    k = kennzahlen(r)
+
+    eingesetzt = float(gew.abs().to_numpy().sum())
+    assert eingesetzt > 0, (
+        "Der Rahmen nimmt auf diesen Daten gar keine Positionen ein - dann"
+        " sagt ein Sharpe nahe null nichts ueber Scheinkanten aus."
+    )
+    assert float(r.std()) > 0, (
+        "Die Renditereihe schwankt nicht - es wurde effektiv nicht gehandelt."
+    )
+
+    print(f"    Rauschen: Sharpe {k['Sharpe']:.2f}  pro Jahr {k['pro Jahr %']:.1f} %"
+          f"  (eingesetzte Gewichte {eingesetzt:.0f})")
     assert abs(k["Sharpe"]) < 1.0, "Bei Rauschen darf keine starke Kante erscheinen"
     print("OK  Rauschen bringt nichts: keine Scheinkante")
 
@@ -153,6 +171,15 @@ def test_divisor_zaehlt_nur_aktive():
     r = rendite_reihe(kurse, pos, kosten=0.0)
     frueh = r.iloc[10 : n // 2 - 5]
     erwartet = kurse["A"].pct_change(fill_method=None).iloc[10 : n // 2 - 5]
+
+    # Gegenprobe: Wuerde ein falscher Divisor (durch ALLE Spalten teilen statt
+    # nur durch die aktiven) hier ueberhaupt auffallen? Ohne diesen Nachweis
+    # koennte die Abweichung auch deshalb null sein, weil gar nichts passiert.
+    falsch = erwartet / 2.0
+    assert float((falsch - erwartet).abs().max()) > 1e-6, (
+        "Ein falscher Divisor wuerde an diesen Daten keinen Unterschied machen"
+        " - der Test koennte den Fehler gar nicht bemerken."
+    )
 
     abweichung = float((frueh - erwartet).abs().max())
     print(f"    max. Abweichung in der Einzel-Phase: {abweichung:.2e}")

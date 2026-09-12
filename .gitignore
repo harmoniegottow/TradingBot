@@ -19,3 +19,6 @@ data/
 .DS_Store
 mt5-windows.zip
 data-mt5/
+# cTrader-Kursdaten - jederzeit mit lade_ctrader.py neu ziehbar
+data-ctrader/
+NOT-AUS
