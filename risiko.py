@@ -6,10 +6,11 @@ Sperren, Kursalter, Waehrungsumrechnung. Kein Protobuf, keine Verbindung,
 kein Twisted - deshalb laesst sich alles ohne Broker pruefen.
 
 Diese Grenze ist keine Stilfrage, sondern der Grund, warum die Tests ohne
-Konto laufen. test_risiko.py sichert sie ab: Ein Import von
+Konto laufen. test_risiko_grenze.py sichert sie ab: Ein Import von
 ctrader_open_api oder twisted - auch ueber Umwege - laesst den Test
 fehlschlagen.
 
+Was nach dem Absenden einer Order passiert, liegt in ausfuehrung.py.
 Die Verbindung und alles Protobuf liegen in handel.py.
 """
 from __future__ import annotations
@@ -498,7 +499,6 @@ def sperren_pruefen(bestand: Bestand, tagesergebnis: Tagesergebnis,
     return None
 
 
-# Zweiter Risikosatz, der bei einer Ablehnung zum Vergleich genannt wird.
 VERGLEICHS_RISIKO = Decimal("1")
 
 
@@ -654,6 +654,7 @@ def vorschlag_bauen(grenzen: Symbolgrenzen, seite: str, einstieg: Decimal,
         label=label_bauen(grenzen.name), begruendung=begruendung,
         entscheid=entscheid,
     )
+
 
 def betrag_umrechnen(rohwert: int, stellen: int) -> Decimal:
     """Ganzzahlbetrag in einen echten Betrag wandeln.

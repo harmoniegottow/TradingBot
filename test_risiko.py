@@ -44,9 +44,12 @@ from risiko import (
     vorschlag_bauen,
 )
 
-# Der bisherige Name handel.* bleibt als Kuerzel erhalten, damit die Tests
-# nicht Zeile fuer Zeile umgeschrieben werden mussten.
+# Der bisherige Name handel.* bleibt als Kuerzel erhalten.
 handel = risiko
+
+
+handel = risiko
+
 
 EINS = Decimal(1)
 
@@ -753,6 +756,7 @@ def test_ausgabe_unterscheidet_die_vier_faelle():
     assert "wirkungslos" in hinweise["Live"]
     assert "keine Kappe" in hinweise["ohne Kappe"]
     print("OK  Alle vier Faelle melden einen eigenen Hinweis")
+
 
 def abgelehnter_vorschlag():
     return vorschlag_bauen(

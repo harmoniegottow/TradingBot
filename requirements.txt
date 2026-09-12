@@ -1,0 +1,59 @@
+# requirements.txt - festgenagelte Fassungen fuer den Tradingbot
+#
+# Aufsetzen:
+#     uv venv .venv
+#     VIRTUAL_ENV=.venv uv pip install -r requirements.txt
+#
+# Warum ueberhaupt festgenagelt: Die Ausfuehrungswache in handel.py haengt
+# sich in den Nachrichtenempfaenger des cTrader-Clients ein und liest dafuer
+# dessen PRIVATES Attribut _messageReceivedCallback (siehe
+# ctrader_open_api/client.py, setMessageReceivedCallback). Benennt ein
+# Versionssprung dieses Attribut um, bricht die Verkettung. Seit dem
+# 12.09.2026 bricht handel.empfaenger_holen() in diesem Fall mit einer
+# klaren Meldung ab, statt still weiterzumachen - aber der Bot handelt dann
+# nicht mehr. Deshalb: Fassung fest, Sprung nur bewusst und mit Testlauf.
+
+# --- cTrader Open API -------------------------------------------------
+ctrader-open-api==0.9.2
+
+# ACHTUNG, BEWUSSTER KONFLIKT - nicht "reparieren":
+#
+# ctrader-open-api 0.9.2 verlangt hart pyOpenSSL==24.1.0. Installiert ist
+# 26.4.0, und `pip check` meldet deshalb:
+#
+#     ctrader-open-api 0.9.2 has requirement pyOpenSSL==24.1.0,
+#     but you have pyopenssl 26.4.0.
+#
+# Diese Meldung ist erwartet und wird in Kauf genommen. Der TLS-Aufbau zu
+# demo.ctraderapi.com:5035 funktioniert mit 26.4.0 nachweislich - der
+# Trockenlauf am 12.09.2026 hat sich damit verbunden und elf Nachrichten
+# ausgetauscht.
+#
+# Wer den Konflikt "aufloest", indem er pyOpenSSL auf 24.1.0 zwingt, holt
+# sich eine Fassung von 2024 mit den bis dahin bekannten Luecken zurueck und
+# kollidiert ausserdem mit cryptography 50.x. Das kostet zwei Stunden und
+# macht nichts besser. Also: Meldung stehen lassen.
+pyOpenSSL==26.4.0
+cryptography==50.0.0
+
+# Von ctrader-open-api hart verlangt - diese drei NICHT anheben, ohne die
+# Bibliothek mit anzuheben.
+Twisted==24.3.0
+protobuf==3.20.1
+requests==2.32.3
+inputimeout==1.0.4
+service-identity==26.1.0
+
+# --- Auswertung und Backtest ------------------------------------------
+pandas==3.0.5
+numpy==2.5.2
+backtesting==0.6.6
+bokeh==3.10.0
+yfinance==1.6.0
+
+# --- Zugangsdaten ------------------------------------------------------
+python-dotenv==1.2.3
+
+# Nur auf dem Windows-Rechner, nicht auf dem Server installierbar:
+#     pip install MetaTrader5
+# (mt5-windows/ - Zweitquelle, siehe data-mt5/ACHTUNG-Zeitstempel.md)

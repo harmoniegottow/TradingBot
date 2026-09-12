@@ -1,4 +1,6 @@
-"""Sichert die Grenze von risiko.py ab: kein Netzwerk, auch nicht ueber Umwege.
+"""Sichert die Grenze der reinen Module ab: kein Netzwerk, auch nicht ueber Umwege.
+
+Geprueft werden risiko.py und ausfuehrung.py.
 
 Warum als eigene Datei und in einem eigenen Prozess: In diesem Testlauf ist
 handel.py meist schon geladen, und damit stuenden ctrader_open_api und
@@ -16,6 +18,8 @@ from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent
 VERBOTEN = ("ctrader_open_api", "twisted")
+# Module, die ohne Netzwerk auskommen muessen.
+REINE_MODULE = ("risiko", "ausfuehrung")
 
 PROGRAMM = """
 import sys
@@ -56,17 +60,44 @@ def test_die_messung_findet_netzwerkabhaengigkeiten():
     print(f"OK  Positivkontrolle: an handel.py gefunden {sorted(gefunden)}")
 
 
-def test_risiko_zieht_kein_netzwerkmodul_nach():
-    gefunden = mitgezogene_module("risiko")
-    assert not gefunden, (
-        f"risiko.py zieht {sorted(gefunden)} nach - direkt oder ueber ein"
-        " Modul, das es importiert. Damit waere die Rechnung nicht mehr ohne"
-        " Broker pruefbar. Den neuen Import wieder herausnehmen."
+def test_reine_module_ziehen_kein_netzwerkmodul_nach():
+    for modul in REINE_MODULE:
+        gefunden = mitgezogene_module(modul)
+        assert not gefunden, (
+            f"{modul}.py zieht {sorted(gefunden)} nach - direkt oder ueber ein"
+            " Modul, das es importiert. Damit waere die Rechnung nicht mehr"
+            " ohne Broker pruefbar. Den neuen Import wieder herausnehmen."
+        )
+        print(f"OK  {modul}.py zieht weder ctrader_open_api noch twisted nach")
+
+
+def test_ausfuehrung_darf_risiko_importieren_aber_nicht_umgekehrt():
+    """Die Richtung muss stimmen, sonst entsteht ein Kreis.
+
+    Gegenprobe: Der erwartete Import MUSS vorhanden sein - sonst pruefte der
+    Test unten nur, dass zwei Dateien nichts voneinander wissen.
+    """
+    def importzeilen(datei: str) -> list:
+        # Nur echte Importe zaehlen. Eine Erwaehnung im Docstring ist ein
+        # Verweis fuer Lesende, kein Kreis - der erste Anlauf dieses Tests
+        # ist genau daran gescheitert.
+        return [z.strip() for z in (WURZEL / datei).read_text(
+            encoding="utf-8").splitlines()
+            if z.strip().startswith(("import ", "from "))]
+
+    aus = importzeilen("ausfuehrung.py")
+    ris = importzeilen("risiko.py")
+    assert any(z.startswith("from risiko import") for z in aus), (
+        "ausfuehrung.py importiert gar nicht aus risiko - die Richtung laesst"
+        " sich dann nicht pruefen."
     )
-    print("OK  risiko.py zieht weder ctrader_open_api noch twisted nach")
+    assert not any("ausfuehrung" in z for z in ris), (
+        f"risiko.py importiert ausfuehrung - das waere ein Kreis: {ris}"
+    )
+    print("OK  ausfuehrung.py baut auf risiko.py auf, nicht umgekehrt")
 
 
-def test_risiko_importiert_kein_projektmodul_mit_netzwerk():
+def test_reine_module_importieren_kein_projektmodul_mit_netzwerk():
     """Auch der Umweg ueber eigene Module ist gesperrt.
 
     Gegenprobe: Die Liste der eigenen Module darf nicht leer sein, sonst
@@ -75,19 +106,21 @@ def test_risiko_importiert_kein_projektmodul_mit_netzwerk():
     mit_netzwerk = ("handel", "verbindung", "lade_ctrader", "lade_ctrader_voll")
     assert mit_netzwerk, "Ohne Vergleichsliste prueft dieser Test nichts"
 
-    quelle = (WURZEL / "risiko.py").read_text(encoding="utf-8")
-    for modul in mit_netzwerk:
-        for zeile in quelle.splitlines():
-            nackt = zeile.strip()
-            if nackt.startswith(("import ", "from ")):
-                assert f" {modul}" not in f" {nackt} ", (
-                    f"risiko.py importiert {modul}: {nackt}"
-                )
-    print("OK  risiko.py importiert kein Projektmodul mit Netzwerkzugriff")
+    for rein in REINE_MODULE:
+        quelle = (WURZEL / f"{rein}.py").read_text(encoding="utf-8")
+        for modul in mit_netzwerk:
+            for zeile in quelle.splitlines():
+                nackt = zeile.strip()
+                if nackt.startswith(("import ", "from ")):
+                    assert f" {modul}" not in f" {nackt} ", (
+                        f"{rein}.py importiert {modul}: {nackt}"
+                    )
+        print(f"OK  {rein}.py importiert kein Projektmodul mit Netzwerkzugriff")
 
 
 if __name__ == "__main__":
     test_die_messung_findet_netzwerkabhaengigkeiten()
-    test_risiko_zieht_kein_netzwerkmodul_nach()
-    test_risiko_importiert_kein_projektmodul_mit_netzwerk()
+    test_reine_module_ziehen_kein_netzwerkmodul_nach()
+    test_ausfuehrung_darf_risiko_importieren_aber_nicht_umgekehrt()
+    test_reine_module_importieren_kein_projektmodul_mit_netzwerk()
     print("\nDie Grenze von risiko.py haelt.")
