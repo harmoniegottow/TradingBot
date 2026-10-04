@@ -3,6 +3,7 @@
 # oeffnet Port 22 nur fuer den Hermes-Server. Mehrfach ausfuehrbar.
 
 $ErrorActionPreference = "Stop"
+Write-Host "vps_einrichten.ps1 Fassung 3 (Gruppen per SID, deutsches Windows)"
 $BotUser  = "tradingbot"
 $HermesIP = "152.239.113.4"
 $PubKey   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDroiySjn65w1RqJ/h/HWXlee+bu9yeMggM0Edh+Jp+O hermes-tradingbot"
@@ -14,10 +15,13 @@ if (-not (Get-LocalUser -Name $BotUser -ErrorAction SilentlyContinue)) {
         -Description "Laufzeitkonto Tradingbot" -PasswordNeverExpires | Out-Null
     Write-Host "Konto $BotUser angelegt."
 } else { Write-Host "Konto $BotUser existiert bereits." }
-if (-not (Get-LocalGroupMember -Group "Remote Desktop Users" -ErrorAction SilentlyContinue |
+# Gruppe per SID, weil sie auf deutschem Windows "Remotedesktopbenutzer" heisst
+$rdpGruppe = Get-LocalGroup -SID "S-1-5-32-555"
+if (-not (Get-LocalGroupMember -Group $rdpGruppe -ErrorAction SilentlyContinue |
           Where-Object { $_.Name -like "*\$BotUser" })) {
-    Add-LocalGroupMember -Group "Remote Desktop Users" -Member $BotUser
-}
+    Add-LocalGroupMember -Group $rdpGruppe -Member $BotUser
+    Write-Host "$BotUser zur Gruppe $($rdpGruppe.Name) hinzugefuegt."
+} else { Write-Host "$BotUser ist bereits in $($rdpGruppe.Name)." }
 
 # 2. OpenSSH-Server
 $cap = Get-WindowsCapability -Online -Name "OpenSSH.Server*"
@@ -28,7 +32,7 @@ Start-Service sshd   # erzeugt beim ersten Start C:\ProgramData\ssh\sshd_config
 # 3. Schluessel zentral ablegen
 $keyFile = "C:\ProgramData\ssh\tradingbot_authorized_keys"
 Set-Content -Path $keyFile -Value $PubKey -Encoding ascii
-icacls $keyFile /inheritance:r /grant "SYSTEM:F" /grant "Administrators:F" /grant "${BotUser}:R" | Out-Null
+icacls $keyFile /inheritance:r /grant "*S-1-5-18:F" /grant "*S-1-5-32-544:F" /grant "${BotUser}:R" | Out-Null
 
 # 4. sshd_config: eigene Regeln OBEN einfuegen (vor jedem Match-Block,
 #    sonst gelten sie nur innerhalb des Match-Blocks der Standarddatei)
