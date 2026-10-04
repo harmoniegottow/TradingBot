@@ -23,6 +23,15 @@ if (-not (Get-LocalGroupMember -Group $rdpGruppe -ErrorAction SilentlyContinue |
     Write-Host "$BotUser zur Gruppe $($rdpGruppe.Name) hinzugefuegt."
 } else { Write-Host "$BotUser ist bereits in $($rdpGruppe.Name)." }
 
+# Server 2025: sshd_config enthaelt ab Werk "AllowGroups administrators openssh users".
+# Ohne Mitgliedschaft in "OpenSSH Users" (SID S-1-5-32-585) lehnt sshd das Konto ab.
+$sshGruppe = Get-LocalGroup -SID "S-1-5-32-585" -ErrorAction SilentlyContinue
+if ($sshGruppe -and -not (Get-LocalGroupMember -Group $sshGruppe -ErrorAction SilentlyContinue |
+          Where-Object { $_.Name -like "*\$BotUser" })) {
+    Add-LocalGroupMember -Group $sshGruppe -Member $BotUser
+    Write-Host "$BotUser zur Gruppe $($sshGruppe.Name) hinzugefuegt."
+}
+
 # 2. OpenSSH-Server
 $cap = Get-WindowsCapability -Online -Name "OpenSSH.Server*"
 if ($cap.State -ne "Installed") { Add-WindowsCapability -Online -Name $cap.Name | Out-Null }
