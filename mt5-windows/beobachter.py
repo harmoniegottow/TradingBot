@@ -331,7 +331,11 @@ def divergenz_signal(df_gold: pd.DataFrame,
 # Verbindung und Symbole
 # ----------------------------------------------------------------------
 def verbinden() -> None:
-    if not mt5.initialize():
+    # Auf dem VPS laufen zwei Terminals (Admin- und Bot-Sitzung). Ueber
+    # MT5_PFAD laesst sich festlegen, welches gemeint ist.
+    pfad = os.environ.get("MT5_PFAD")
+    ok = mt5.initialize(path=pfad, timeout=60000) if pfad else mt5.initialize()
+    if not ok:
         log.error(f"MT5-Initialisierung fehlgeschlagen: {mt5.last_error()}")
         log.error("Ist das MT5-Terminal gestartet und eingeloggt?")
         sys.exit(1)
