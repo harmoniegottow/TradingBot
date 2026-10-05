@@ -69,6 +69,13 @@ STARTPUNKT = {
     # Gemessen beginnt XAUUSD D1 im April 1998 - mit Rand davor, damit ein
     # Symbol mit laengerer Historie nicht am Startpunkt abgeschnitten wird.
     "D1": datetime(1996, 1, 1, tzinfo=timezone.utc),
+    # Kleine Zeitrahmen fuer die Mehrzeitrahmen-Pruefung (05.10.2026).
+    # Bewusst NICHT bis 2006: M15 ab 2015 sind gut 250.000 Kerzen je Markt,
+    # M5 ab 2019 rund 520.000. Mehr bremst nur den Backtest, ohne die
+    # Aussage zu verbessern - zehn bzw. sieben Jahre decken mehrere
+    # Zinszyklen ab (Nullzins, Zinswende 2022, Hochzins).
+    "M15": datetime(2015, 1, 1, tzinfo=timezone.utc),
+    "M5": datetime(2019, 1, 1, tzinfo=timezone.utc),
 }
 STANDARD_ZEITRAHMEN = ("H1", "H4")
 

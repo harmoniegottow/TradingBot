@@ -80,6 +80,14 @@ SWAP_SAETZE = {
                        gemessen="ProtoOASymbol am 12.09.2026"),
     "XAGUSD": Swapsatz("XAGUSD", long_pips=-1.66, short_pips=0.49, pip=0.01,
                        gemessen="ProtoOASymbol am 12.09.2026"),
+    # Nachgeholt am 05.10.2026 mit hole_swapsaetze.py fuer die Short-Pruefung.
+    # Gleiche Grenze wie oben: heutiges Zinsniveau, nicht rueckwirkend gueltig.
+    "EURUSD": Swapsatz("EURUSD", long_pips=-0.73, short_pips=0.16, pip=0.0001,
+                       gemessen="ProtoOASymbol am 05.10.2026"),
+    "USDJPY": Swapsatz("USDJPY", long_pips=0.30, short_pips=-1.58, pip=0.01,
+                       gemessen="ProtoOASymbol am 05.10.2026"),
+    "CHFJPY": Swapsatz("CHFJPY", long_pips=-1.12, short_pips=0.23, pip=0.01,
+                       gemessen="ProtoOASymbol am 05.10.2026"),
 }
 
 
