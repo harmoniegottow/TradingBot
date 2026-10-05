@@ -196,6 +196,7 @@ def _w(x):
 class Setup(Strategy):
     rr = 3.0
     mindestens = 2
+    nur = None  # z. B. ("ChoCh", "FVG"): nur genau diese Kombination
     puffer = SPREAD["XAUUSD"]
     von_stunde, bis_stunde = 7, 20
 
@@ -245,6 +246,8 @@ class Setup(Strategy):
         dabei = {k: v[1] for k, v in teile.items() if v[0]}
         if len(dabei) < self.mindestens:
             return
+        if self.nur is not None and set(dabei) != set(self.nur):
+            return
         kurs = self.data.Close[-1]
         if lang:
             stop = min(dabei.values()) - self.puffer
@@ -253,6 +256,10 @@ class Setup(Strategy):
             stop = max(dabei.values()) + self.puffer
             dist = stop - kurs
         if not (dist > 0) or not np.isfinite(dist):
+            return
+        # Ziel unter null ist kein handelbares Setup (Stop mehr als ein
+        # Drittel des Kurses entfernt, z. B. Platin im Maerz 2020).
+        if not lang and kurs - dist * self.rr <= 0:
             return
         tag = "+".join(sorted(dabei)) + f"|{dist:.6f}|{dist / self.data.ATR[-1]:.4f}"
         if lang:
@@ -285,6 +292,8 @@ class ZufallSetup(Setup):
             return
         dist = a * float(self.rng.choice(self.stops_atr))
         kurs = self.data.Close[-1]
+        if richtung < 0 and kurs - dist * self.rr <= 0:
+            return
         tag = f"Zufall|{dist:.6f}|0"
         if richtung > 0:
             self.buy(size=0.1, sl=kurs - dist, tp=kurs + dist * self.rr, tag=tag)

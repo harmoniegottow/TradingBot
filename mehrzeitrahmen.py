@@ -58,8 +58,13 @@ KAPITAL = 100_000
 # CHFJPY stand bei der Messung auf 0 (kein Kurs) - angenommen 2,5 Pips,
 # typisch fuer dieses Kreuz bei Pepperstone. ANNAHME, nicht gemessen.
 SPREAD = {"EURUSD": 0.00013, "USDJPY": 0.016, "XAUUSD": 0.26,
-          "CHFJPY": 0.025}
-PIP = {"EURUSD": 0.0001, "USDJPY": 0.01, "XAUUSD": 0.1, "CHFJPY": 0.01}
+          "CHFJPY": 0.025,
+          # Live gemessen am 05.10.2026 am MT5-Demokonto (NAS100 1,0 Punkt,
+          # XAGUSD 0,023). XPTUSD hatte keinen Kurs: 2,0 Dollar ist eine
+          # ANNAHME (typisch rund 0,2 Prozent des Kurses), nicht gemessen.
+          "NAS100": 1.0, "XAGUSD": 0.023, "XPTUSD": 2.0}
+PIP = {"EURUSD": 0.0001, "USDJPY": 0.01, "XAUUSD": 0.1, "CHFJPY": 0.01,
+       "NAS100": 1.0, "XAGUSD": 0.01, "XPTUSD": 0.1}
 SCHLUPF_PIPS = 0.2
 MINUTEN = {"M_5": 5, "M_15": 15}
 
